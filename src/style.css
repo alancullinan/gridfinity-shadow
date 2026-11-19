@@ -90,3 +90,6 @@ details { margin-top: 8px; color: var(--muted); }
 .item-controls .group { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .item-controls button { padding: 4px 9px; min-width: 34px; }
 .item-controls input[type="number"] { width: 4.5em; }
+.zone-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 6px 0 0 12px; padding-left: 10px; border-left: 3px solid var(--border); }
+.zone-row button { padding: 3px 8px; }
+.zone-row input[type="number"] { width: 4.5em; }

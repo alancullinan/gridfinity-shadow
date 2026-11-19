@@ -1,5 +1,23 @@
 import type { Point } from './sheet';
 
+/**
+ * A shape laid over an item's pocket that sets a different depth wherever it overlaps the
+ * pocket (e.g. deeper under a screwdriver handle). Positioned in the item's own coordinates.
+ */
+export interface DepthZone {
+  kind: 'rect' | 'circle';
+  x: number;
+  y: number;
+  /** Width, or diameter for a circle. */
+  w: number;
+  /** Height (rectangles only). */
+  h: number;
+  /** Rotation relative to the item, degrees. */
+  rotation: number;
+  /** Pocket depth inside the zone, mm. */
+  depth: number;
+}
+
 export interface Item {
   id: number;
   name: string;
@@ -14,6 +32,8 @@ export interface Item {
   rotation: number;
   /** Finger notch centres, on the outline, in the item's own coordinates (they rotate with it). */
   notches: Point[];
+  /** Depth zones, applied in order (later ones win where they overlap). */
+  zones: DepthZone[];
 }
 
 export interface BinSettings {
@@ -316,7 +336,48 @@ export function suggestNotch(item: Item): Point {
   return toItemCoords(nearestOnLoops(placedLoops(item), target), item);
 }
 
+/** Outline of a depth zone in the zone's own frame, relative to its centre. */
+function zoneShape(z: DepthZone): Point[] {
+  if (z.kind === 'circle') {
+    const r = z.w / 2, n = 48;
+    return Array.from({ length: n }, (_, i) => ({ x: r * Math.cos((2 * Math.PI * i) / n), y: r * Math.sin((2 * Math.PI * i) / n) }));
+  }
+  return [
+    { x: -z.w / 2, y: -z.h / 2 },
+    { x: z.w / 2, y: -z.h / 2 },
+    { x: z.w / 2, y: z.h / 2 },
+    { x: -z.w / 2, y: z.h / 2 },
+  ];
+}
+
+/** Depth zone outline in the item's own coordinates. */
+export function zoneLocalPolygon(z: DepthZone): Point[] {
+  return zoneShape(z).map((p) => transformPoint(p, z));
+}
+
+/** Depth zone outline in bin top-view coordinates. */
+export function placedZone(item: Item, z: DepthZone): Point[] {
+  return zoneLocalPolygon(z).map((p) => transformPoint(p, item));
+}
+
+/** Position of a zone's resize handle in top-view coordinates. */
+export function zoneHandle(item: Item, z: DepthZone): Point {
+  const local = z.kind === 'circle' ? { x: z.w / 2, y: 0 } : { x: z.w / 2, y: z.h / 2 };
+  return transformPoint(transformPoint(local, z), item);
+}
+
+/** A sensible first zone: the left half of the item (as stored), a few mm deeper. */
+export function defaultZone(item: Item, kind: DepthZone['kind']): DepthZone {
+  const b = rotatedBBox(item.loops, 0);
+  const depth = item.depth + 5;
+  if (kind === 'circle') {
+    const d = Math.max(6, Math.min(b.w, b.h) * 0.8);
+    return { kind, x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2, w: d, h: d, rotation: 0, depth };
+  }
+  return { kind, x: b.minX + b.w / 4, y: (b.minY + b.maxY) / 2, w: b.w / 2 + 2, h: b.h + 4, rotation: 0, depth };
+}
+
 export function requiredHeightUnits(items: Item[], settings: BinSettings): number {
-  const deepest = Math.max(0, ...items.map((i) => i.depth));
+  const deepest = Math.max(0, ...items.flatMap((i) => [i.depth, ...i.zones.map((z) => z.depth)]));
   return Math.max(2, Math.ceil((GF.baseHeight + settings.floor + deepest) / GF.heightUnit - 1e-9));
 }

@@ -1,5 +1,5 @@
 import type { CrossSection, Manifold, ManifoldToplevel } from 'manifold-3d';
-import { BinSettings, GF, Item, binOuterSize, placedLoops, placedNotches, requiredHeightUnits } from './layout';
+import { BinSettings, GF, Item, binOuterSize, placedLoops, placedNotches, placedZone, requiredHeightUnits } from './layout';
 
 /** Tracks WASM objects so intermediates can be freed in one go. */
 class Scope {
@@ -95,7 +95,8 @@ export function buildBin(wasm: ManifoldToplevel, items: Item[], settings: BinSet
   for (const item of items) {
     // Top view uses y down; the model uses y up, so flip.
     const polys = placedLoops(item).map((l) => l.map((p) => [p.x, -p.y] as [number, number]));
-    let shape = s.t(s.t(s.t(new CrossSection(polys, 'NonZero')).offset(settings.clearance, 'Round', 2, SEGS)).simplify(0.02));
+    const pocket = s.t(s.t(s.t(new CrossSection(polys, 'NonZero')).offset(settings.clearance, 'Round', 2, SEGS)).simplify(0.02));
+    let shape = pocket;
     for (const nc of placedNotches(item)) {
       const circle = s.t(s.t(CrossSection.circle(settings.fingerRadius, SEGS)).translate([nc.x, -nc.y]));
       // Notches are cut separately so they can stop a little shallower than very deep pockets.
@@ -105,7 +106,23 @@ export function buildBin(wasm: ManifoldToplevel, items: Item[], settings: BinSet
     }
     sumArea += shape.area();
     pocketShapes.push(shape);
-    cuts.push(s.t(s.t(shape.extrude(cutTop - (top - item.depth))).translate([0, 0, top - item.depth])));
+
+    // Depth layers: the pocket at the item's depth, then each zone (clipped to the pocket) at its
+    // own depth. Later layers win, so each layer only keeps the part no later layer covers.
+    const layers: { region: CrossSection; depth: number }[] = [{ region: pocket, depth: item.depth }];
+    item.zones.forEach((z, zi) => {
+      const poly = placedZone(item, z).map((p) => [p.x, -p.y] as [number, number]);
+      const region = s.t(pocket.intersect(s.t(new CrossSection([poly], 'NonZero'))));
+      if (region.area() < 0.5) warnings.push(`Depth zone ${zi + 1} on "${item.name}" doesn't overlap its pocket.`);
+      else layers.push({ region, depth: z.depth });
+    });
+    for (let li = 0; li < layers.length; li++) {
+      let region = layers[li].region;
+      if (li + 1 < layers.length) region = s.t(region.subtract(s.t(CrossSection.union(layers.slice(li + 1).map((l) => l.region)))));
+      if (region.area() < 0.01) continue;
+      const d = layers[li].depth;
+      cuts.push(s.t(s.t(region.extrude(cutTop - (top - d))).translate([0, 0, top - d])));
+    }
     // Bounds check against the usable area.
     const usable = roundedRect(W - 2 * GF.edgeMargin, D - 2 * GF.edgeMargin, Math.max(0.5, R - GF.edgeMargin));
     if (s.t(shape.subtract(usable)).area() > 0.5) warnings.push(`"${item.name}" sticks out past the bin's inner edge.`);

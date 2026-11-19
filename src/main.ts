@@ -12,11 +12,15 @@ import {
   Item,
   autoArrange,
   bestOrientation,
+  DepthZone,
   binOuterSize,
   centreLoops,
   defaultSettings,
   fitBinToItems,
   nearestOnLoops,
+  defaultZone,
+  placedZone,
+  zoneHandle,
   placedNotches,
   suggestNotch,
   toItemCoords,
@@ -393,7 +397,7 @@ $('add-items').addEventListener('click', () => {
   if (!chosen.length) return;
   for (const d of chosen) {
     const { loops } = centreLoops(d.outline.loops);
-    items.push({ id: nextId++, name: d.name, loops, depth: d.depth, x: 0, y: 0, rotation: bestOrientation(loops), notches: [] });
+    items.push({ id: nextId++, name: d.name, loops, depth: d.depth, x: 0, y: 0, rotation: bestOrientation(loops), notches: [], zones: [] });
   }
   arrange();
   $('step-bin').scrollIntoView({ behavior: 'smooth' });
@@ -465,6 +469,7 @@ $('add-test').addEventListener('click', () => {
     y: 0,
     rotation: 0,
     notches: [{ x: 0, y: -h / 2 }],
+    zones: [],
   });
   arrange();
 });
@@ -489,7 +494,21 @@ function renderItems() {
           <button data-n="1" aria-label="Add a notch">+</button></span>
         <span class="group">Rotate
           <button data-r="-90" title="Rotate 90° left">⟲ 90°</button><button data-r="-15" title="Rotate 15° left">⟲ 15°</button><button data-r="15" title="Rotate 15° right">15° ⟳</button><button data-r="90" title="Rotate 90° right">90° ⟳</button></span>
-      </div>`;
+      </div>
+      <div class="item-controls">
+        <span class="group">Depth zones
+          <button data-z="rect" title="Add a rectangular depth zone">+ ▭</button><button data-z="circle" title="Add a round depth zone">+ ◯</button></span>
+      </div>
+      ${it.zones
+        .map(
+          (z, zi) => `<div class="zone-row">
+        <span>${z.kind === 'rect' ? '▭' : '◯'} ${zi + 1}</span>
+        <label>Depth <input type="number" min="1" max="150" step="0.5" value="${z.depth}" data-zd="${zi}"> mm</label>
+        ${z.kind === 'rect' ? `<button data-zr="${zi}" title="Rotate zone 15°">⟳ 15°</button>` : ''}
+        <button data-zx="${zi}" title="Remove zone" aria-label="Remove zone">✕</button>
+      </div>`,
+        )
+        .join('')}`;
     const [name, depth] = card.querySelectorAll('input');
     name.value = it.name;
     name.addEventListener('input', () => {
@@ -506,6 +525,33 @@ function renderItems() {
         else it.notches.pop();
         renderItems();
         manualLayoutChanged();
+      }),
+    );
+    card.querySelectorAll<HTMLButtonElement>('button[data-z]').forEach((b) =>
+      b.addEventListener('click', () => {
+        it.zones.push(defaultZone(it, b.dataset.z as DepthZone['kind']));
+        renderItems();
+        changed();
+      }),
+    );
+    card.querySelectorAll<HTMLInputElement>('input[data-zd]').forEach((inp) =>
+      inp.addEventListener('change', () => {
+        const z = it.zones[+inp.dataset.zd!];
+        z.depth = Math.max(0.5, +inp.value || z.depth);
+        changed();
+      }),
+    );
+    card.querySelectorAll<HTMLButtonElement>('button[data-zr]').forEach((b) =>
+      b.addEventListener('click', () => {
+        it.zones[+b.dataset.zr!].rotation += 15;
+        changed();
+      }),
+    );
+    card.querySelectorAll<HTMLButtonElement>('button[data-zx]').forEach((b) =>
+      b.addEventListener('click', () => {
+        it.zones.splice(+b.dataset.zx!, 1);
+        renderItems();
+        changed();
       }),
     );
     card.querySelectorAll<HTMLButtonElement>('button[data-r]').forEach((b) =>
@@ -588,6 +634,48 @@ function drawLayout() {
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = color;
     ctx.stroke();
+    // Depth zones: shaded inside the item (dark = deeper, light = shallower), outlined in full.
+    const dpr = Math.min(2, devicePixelRatio);
+    for (const z of it.zones) {
+      const poly = placedZone(it, z);
+      const tracePoly = () => {
+        ctx.beginPath();
+        poly.forEach((p, k) => (k ? ctx.lineTo(tx(p.x), ty(p.y)) : ctx.moveTo(tx(p.x), ty(p.y))));
+        ctx.closePath();
+      };
+      ctx.save();
+      ctx.beginPath();
+      for (const loop of placedLoops(it)) {
+        loop.forEach((p, k) => (k ? ctx.lineTo(tx(p.x), ty(p.y)) : ctx.moveTo(tx(p.x), ty(p.y))));
+        ctx.closePath();
+      }
+      ctx.clip();
+      tracePoly();
+      ctx.fillStyle = z.depth >= it.depth ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.65)';
+      ctx.fill();
+      ctx.restore();
+      tracePoly();
+      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = dark ? '#fff' : '#222';
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const c = poly.reduce((a, p) => ({ x: a.x + p.x / poly.length, y: a.y + p.y / poly.length }), { x: 0, y: 0 });
+      ctx.font = `bold ${Math.round(11 * dpr)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.strokeText(`${z.depth} mm`, tx(c.x), ty(c.y));
+      ctx.fillStyle = '#111';
+      ctx.fillText(`${z.depth} mm`, tx(c.x), ty(c.y));
+      const hnd = zoneHandle(it, z), hs = 5 * dpr;
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(tx(hnd.x) - hs, ty(hnd.y) - hs, 2 * hs, 2 * hs);
+      ctx.strokeRect(tx(hnd.x) - hs, ty(hnd.y) - hs, 2 * hs, 2 * hs);
+    }
     for (const nc of placedNotches(it)) {
       ctx.beginPath();
       ctx.arc(tx(nc.x), ty(nc.y), settings.fingerRadius * scale, 0, Math.PI * 2);
@@ -629,6 +717,7 @@ function pointInLoops(p: Point, loops: Point[][]): boolean {
 {
   let drag: { item: Item; start: Point; x0: number; y0: number; rot0: number; rotate: boolean } | null = null;
   let notchDrag: { item: Item; index: number } | null = null;
+  let zoneDrag: { item: Item; zone: DepthZone; resize: boolean; start: Point; x0: number; y0: number } | null = null;
   const toMm = (e: PointerEvent): Point => {
     const b = layoutCanvas.getBoundingClientRect();
     const px = ((e.clientX - b.left) / b.width) * layoutCanvas.width;
@@ -653,6 +742,25 @@ function pointInLoops(p: Point, loops: Point[][]): boolean {
       layoutCanvas.setPointerCapture(e.pointerId);
       return;
     }
+    // Then depth zones: resize handles, then zone bodies (topmost first).
+    const handleMm = (16 * Math.min(2, devicePixelRatio)) / layoutView.scale;
+    zoneDrag = null;
+    for (let i = items.length - 1; i >= 0 && !zoneDrag; i--) {
+      const it = items[i];
+      for (let zi = it.zones.length - 1; zi >= 0; zi--) {
+        const z = it.zones[zi];
+        const h = zoneHandle(it, z);
+        const onHandle = Math.hypot(h.x - p.x, h.y - p.y) < handleMm;
+        if (onHandle || pointInLoops(p, [placedZone(it, z)])) {
+          zoneDrag = { item: it, zone: z, resize: onHandle, start: toItemCoords(p, it), x0: z.x, y0: z.y };
+          break;
+        }
+      }
+    }
+    if (zoneDrag) {
+      layoutCanvas.setPointerCapture(e.pointerId);
+      return;
+    }
     for (let i = items.length - 1; i >= 0; i--) {
       if (pointInLoops(p, placedLoops(items[i]))) {
         const it = items[i];
@@ -663,6 +771,24 @@ function pointInLoops(p: Point, loops: Point[][]): boolean {
     }
   });
   layoutCanvas.addEventListener('pointermove', (e) => {
+    if (zoneDrag) {
+      const { item: it, zone: z } = zoneDrag;
+      const q = toItemCoords(toMm(e), it);
+      if (zoneDrag.resize) {
+        // Size from the pointer's position in the zone's own (rotated) frame.
+        const l = toItemCoords(q, z);
+        if (z.kind === 'circle') z.w = z.h = Math.max(2, 2 * Math.hypot(l.x, l.y));
+        else {
+          z.w = Math.max(2, 2 * Math.abs(l.x));
+          z.h = Math.max(2, 2 * Math.abs(l.y));
+        }
+      } else {
+        z.x = zoneDrag.x0 + q.x - zoneDrag.start.x;
+        z.y = zoneDrag.y0 + q.y - zoneDrag.start.y;
+      }
+      drawLayout();
+      return;
+    }
     if (notchDrag) {
       // Slide the notch along the item's outline, following the finger.
       const it = notchDrag.item;
@@ -684,6 +810,11 @@ function pointInLoops(p: Point, loops: Point[][]): boolean {
     drawLayout();
   });
   const end = () => {
+    if (zoneDrag) {
+      zoneDrag = null;
+      changed(); // zones stay inside their pocket, so the bin size can't change
+      return;
+    }
     if (!drag && !notchDrag) return;
     drag = null;
     notchDrag = null;

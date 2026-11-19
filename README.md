@@ -8,7 +8,7 @@ Photograph your items on a printed grid and get a [Gridfinity](https://gridfinit
 2. **Photograph** one or more items lying on the sheet. The app finds the markers, corrects perspective to a true top-down view at 0.25 mm per pixel, evens out the lighting, filters out the cyan grid and traces each item's outline.
    - **Shadows** are told apart from items by checking whether the printed grid lines are still visible at that spot (they show through a shadow, but not through an item) and by colour (shadows don't change it). A touch-up brush can erase or add areas by hand.
    - Using your own squared paper instead: choose *Own paper*, drag the four handles onto the corners of a rectangle you know the size of, and enter that size.
-3. **Arrange**: items are rotated to their tightest orientation and packed into the smallest bin that fits your printer bed (or, if they can't fit, the most compact bigger bin, with a warning). The bin also resizes when you move items by hand. Drag to move, Shift-drag to rotate, set the depth of each item and add finger notches.
+3. **Arrange**: items are rotated to their tightest orientation and packed into the smallest bin that fits your printer bed (or, if they can't fit, the most compact bigger bin, with a warning). The bin also resizes when you move items by hand. Drag to move, Shift-drag to rotate, set the depth of each item, add finger notches (drag them anywhere along the edge) and add **depth zones**: rectangles or circles that make part of a pocket deeper (e.g. under a handle) or shallower.
 4. **Download** a binary STL: standard 42 × 42 × 7 mm Gridfinity base profile, optional magnet holes and stacking lip, pockets offset by your clearance.
 
 ## Development
@@ -40,7 +40,7 @@ Pushing to `main` runs the tests and deploys to GitHub Pages. Enable it once und
 ## Ideas / roadmap
 
 - Several photos merged into one bin (works now: add items from each photo in turn)
-- Per-item depth from a side photo; stepped pockets
+- Per-item depth from a side photo
 - Better packing (nesting non-rectangular shapes)
 - Outline editing (paint to add or remove areas)
 - Labels, lightweight hollow bins, 3MF export
