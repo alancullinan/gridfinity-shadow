@@ -1,0 +1,24 @@
+{
+  "name": "gridfinity-tracer",
+  "version": "0.1.0",
+  "description": "Photograph items on a printed grid and generate a Gridfinity bin with custom cut-outs.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "manifold-3d": "^3.0.1",
+    "three": "^0.170.0"
+  },
+  "private": true,
+  "type": "module"
+}

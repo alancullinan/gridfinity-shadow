@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gridfinity Tracer</title>
+  <meta name="description" content="Photograph items on a printed grid and get a Gridfinity bin with custom cut-outs." />
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Gridfinity Tracer</h1>
+    <p>Photograph your items on the printed grid and get a Gridfinity bin with a pocket for each one.</p>
+  </header>
+  <main>
+    <section class="card" id="step-template">
+      <h2><span class="num">1</span> Print the template</h2>
+      <p>Print the template at <b>100% / actual size</b>, then check the 100 mm bar with a ruler. Lay your items flat inside the grid, clear of the four black squares.</p>
+      <div class="row">
+        <label>Paper
+          <select id="paper">
+            <option value="a4">A4</option>
+            <option value="letter">US Letter</option>
+          </select>
+        </label>
+        <button id="print-template" class="primary">Print template</button>
+        <button id="download-template">Download SVG</button>
+      </div>
+      <details>
+        <summary>Using your own squared paper instead?</summary>
+        <p>Choose "Own paper" in step 2, drag the four corner handles onto the corners of a rectangle you know the size of (for example 36 × 50 squares of 5 mm), and enter its size.</p>
+      </details>
+    </section>
+
+    <section class="card" id="step-photo">
+      <h2><span class="num">2</span> Take a photo</h2>
+      <p>Shoot from straight above in soft, even light. Turn the flash off and avoid hard shadows. Light-coloured or cyan items are hard to see on the paper.</p>
+      <div class="row">
+        <label class="file-button primary">Take / choose photo
+          <input type="file" id="photo-input" accept="image/*" capture="environment" hidden />
+        </label>
+        <label>Reference
+          <select id="ref-mode">
+            <option value="template">Printed template (auto)</option>
+            <option value="manual">Own paper (manual corners)</option>
+          </select>
+        </label>
+        <span id="manual-size" hidden>
+          <label>Width <input type="number" id="ref-w" value="180" min="10" step="5" /> mm</label>
+          <label>Height <input type="number" id="ref-h" value="250" min="10" step="5" /> mm</label>
+        </span>
+      </div>
+      <p id="photo-status" class="status"></p>
+      <div class="two-col" id="photo-views" hidden>
+        <div>
+          <h3>Photo <small>drag the corner handles if they are off</small></h3>
+          <canvas id="photo-canvas"></canvas>
+        </div>
+        <div>
+          <h3>Top-down view &amp; outlines</h3>
+          <canvas id="rect-canvas"></canvas>
+          <div class="row">
+            <label>Sensitivity <input type="range" id="threshold" min="0.05" max="0.6" step="0.01" value="0.25" /></label>
+            <span id="threshold-val">0.25</span>
+          </div>
+        </div>
+      </div>
+      <div id="detected" hidden>
+        <h3>Detected outlines</h3>
+        <table class="items">
+          <thead><tr><th></th><th>Use</th><th>Name</th><th>Size (mm)</th><th>Depth (mm)</th></tr></thead>
+          <tbody id="detected-body"></tbody>
+        </table>
+        <div class="row"><button id="add-items" class="primary">Add selected to bin</button></div>
+      </div>
+    </section>
+
+    <section class="card" id="step-bin">
+      <h2><span class="num">3</span> Arrange the bin</h2>
+      <div class="two-col">
+        <div>
+          <canvas id="layout-canvas"></canvas>
+          <p class="hint">Drag items to move them. Hold Shift and drag to rotate.</p>
+        </div>
+        <div>
+          <div class="settings">
+            <label><input type="checkbox" id="auto-size" checked /> Auto bin size</label>
+            <label>Max size (bed) <input type="number" id="max-units" min="1" max="10" value="5" /> u</label>
+            <label>Width <input type="number" id="units-x" min="1" max="10" value="2" /> u</label>
+            <label>Depth <input type="number" id="units-y" min="1" max="10" value="2" /> u</label>
+            <label>Height <input type="number" id="units-z" min="0" max="20" value="0" /> u <small>(0 = auto)</small></label>
+            <label>Clearance <input type="number" id="clearance" min="0" max="5" step="0.1" value="1" /> mm</label>
+            <label>Spacing <input type="number" id="spacing" min="0.8" max="10" step="0.1" value="2" /> mm</label>
+            <label>Finger notch radius <input type="number" id="finger" min="4" max="25" step="0.5" value="10" /> mm</label>
+            <label><input type="checkbox" id="magnets" /> Magnet holes (6 × 2 mm)</label>
+            <label><input type="checkbox" id="lip" checked /> Stacking lip</label>
+          </div>
+          <div class="row"><button id="arrange">Auto-arrange</button><button id="add-test">Add test shape</button></div>
+          <table class="items">
+            <thead><tr><th>Name</th><th>Depth</th><th>Notch</th><th>Rotate</th><th></th></tr></thead>
+            <tbody id="bin-items"></tbody>
+          </table>
+          <p id="empty-bin" class="hint">No items yet. Add some from a photo, or add a test shape.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="step-model">
+      <h2><span class="num">4</span> Preview &amp; download</h2>
+      <div id="viewer"></div>
+      <ul id="warnings"></ul>
+      <div class="row">
+        <span id="model-info" class="status"></span>
+        <button id="download-stl" class="primary" disabled>Download STL</button>
+      </div>
+    </section>
+  </main>
+  <footer>Gridfinity is an open modular storage system by Zack Freedman. Bins follow the common 42 × 42 × 7 mm spec.</footer>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
