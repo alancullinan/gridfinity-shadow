@@ -1,6 +1,6 @@
 import type { Point, Rect } from '../sheet';
 import { RGBAImage, fillHoles, labelComponents, morph } from './image';
-import { simplifyClosed, traceLoops } from './contour';
+import { simplifyClosed, smoothClosed, traceLoops } from './contour';
 import { polygonArea } from './markers';
 
 export interface DetectedOutline {
@@ -28,6 +28,8 @@ export interface SegmentOptions {
   threshold: number;
   /** Smallest item to keep, in mm². */
   minAreaMm2?: number;
+  /** Outline smoothing strength in mm (Gaussian sigma); 0 = off. Default 1. */
+  smoothMm?: number;
   /** See InkOptions.shadowLevel. */
   shadowLevel?: number;
   /** See InkOptions.grid. */
@@ -328,7 +330,8 @@ export function segmentItems(img: RGBAImage, opts: SegmentOptions): SegmentResul
       continue;
     }
     const loops = traceLoops(labels, w, h, c.label)
-      .map((l) => simplifyClosed(l, 0.8))
+      // Smooth away pixel steps and edge noise, then drop redundant points (~0.05 mm tolerance).
+      .map((l) => simplifyClosed(smoothClosed(l, (opts.smoothMm ?? 1) * ppm, 0.5), Math.max(0.2, ppm * 0.05)))
       .filter((l) => l.length >= 3)
       .map((l) => l.map((p) => ({ x: origin.x + p.x / ppm, y: origin.y + p.y / ppm })))
       // Normalise to counter-clockwise in a y-up frame (positive area with this formula in y-down).

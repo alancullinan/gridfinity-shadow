@@ -112,5 +112,53 @@ describe('shadows', () => {
       expect(ok, `expected ${ew}x${eh} in ${JSON.stringify(dims)}`).toBe(true);
     }
     expect(res.outlines.length).toBe(4);
+
+    // Outline smoothness: the disc's traced outline should hug a true circle.
+    const ripple = (smoothMm: number) => {
+      const r2 = segmentItems(rect, { ppm: 4, origin: region, ignore: ignoreZones(sheet), threshold: 0.25, grid: TEMPLATE_GRID, smoothMm });
+      const disc = r2.outlines.find((o) => Math.abs(o.bbox.w - 40) < 1.5 && Math.abs(o.bbox.h - 40) < 1.5)!;
+      const pts = disc.loops[0];
+      // Area centroid (vertex averages are biased when vertices are unevenly spaced).
+      let A = 0, cx = 0, cy = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length], c = a.x * b.y - b.x * a.y;
+        A += c; cx += (a.x + b.x) * c; cy += (a.y + b.y) * c;
+      }
+      cx /= 3 * A; cy /= 3 * A;
+      // Sample densely along the polygon edges (not just vertices) and measure radius deviation.
+      const radii: number[] = [];
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        for (let t = 0; t < 1; t += 0.1) radii.push(Math.hypot(a.x + (b.x - a.x) * t - cx, a.y + (b.y - a.y) * t - cy));
+      }
+      const mean = radii.reduce((a, r) => a + r, 0) / radii.length;
+      // Radius by angle (degrees, 0..359), to separate overall shape error from ripple.
+      const byAngle = new Array(360).fill(0).map(() => [] as number[]);
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        for (let t = 0; t < 1; t += 0.05) {
+          const x = a.x + (b.x - a.x) * t - cx, y = a.y + (b.y - a.y) * t - cy;
+          byAngle[((Math.round((Math.atan2(y, x) * 180) / Math.PI) % 360) + 360) % 360].push(Math.hypot(x, y));
+        }
+      }
+      const prof = byAngle.map((v) => (v.length ? v.reduce((p, q) => p + q, 0) / v.length : NaN));
+      // Ripple: deviation from a 15-degree (≈5 mm of arc) moving average.
+      let ripple = 0;
+      for (let i = 0; i < 360; i++) {
+        let s = 0, c = 0;
+        for (let k = -7; k <= 7; k++) {
+          const v = prof[(i + k + 360) % 360];
+          if (!isNaN(v)) { s += v; c++; }
+        }
+        if (!isNaN(prof[i]) && c) ripple = Math.max(ripple, Math.abs(prof[i] - s / c));
+      }
+      const shape = [0, 45, 90, 135, 180, 225, 270, 315].map((a) => +prof[a].toFixed(2));
+      return { mean, ripple, shape, maxDev: Math.max(...radii.map((r) => Math.abs(r - mean))), points: pts.length };
+    };
+    const rough = ripple(0), smooth = ripple(1);
+    console.log('disc outline, no smoothing:', JSON.stringify(rough), 'smoothed:', JSON.stringify(smooth));
+    expect(smooth.ripple).toBeLessThan(0.08); // ~ facet size, far below print resolution
+    expect(smooth.ripple).toBeLessThan(rough.ripple / 2);
+    expect(Math.abs(smooth.mean - 20)).toBeLessThan(0.4); // size preserved
   }, 30000);
 });

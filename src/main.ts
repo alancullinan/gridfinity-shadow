@@ -81,7 +81,7 @@ $<HTMLSelectElement>('ref-mode').addEventListener('change', () => {
 });
 for (const id of ['ref-w', 'ref-h']) $(id).addEventListener('change', () => photo && processPhoto());
 
-$<HTMLInputElement>('photo-input').addEventListener('change', async (e) => {
+const onPhotoPicked = async (e: Event) => {
   const file = (e.target as HTMLInputElement).files?.[0];
   if (!file) return;
   status('Loading photo…');
@@ -95,7 +95,10 @@ $<HTMLInputElement>('photo-input').addEventListener('change', async (e) => {
     status(`Could not read that image: ${(err as Error).message}`);
   }
   (e.target as HTMLInputElement).value = '';
-});
+};
+// "Take photo" opens the camera directly; "Choose photo" opens the library / files.
+$('photo-input').addEventListener('change', onPhotoPicked);
+$('photo-choose').addEventListener('change', onPhotoPicked);
 
 async function loadPhoto(file: Blob) {
   const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -162,7 +165,7 @@ function runSegmentation() {
   const threshold = +$<HTMLInputElement>('threshold').value;
   // The printed template's grid starts at the work region's corner; own paper has no known grid.
   const grid = refMode() === 'template' ? TEMPLATE_GRID : undefined;
-  segResult = segmentItems(rectified, { ppm: PPM, origin: rectOrigin, ignore: segIgnore, threshold, grid, edits: edits ?? undefined });
+  segResult = segmentItems(rectified, { ppm: PPM, origin: rectOrigin, ignore: segIgnore, threshold, grid, edits: edits ?? undefined, smoothMm: +$<HTMLInputElement>('smoothing').value });
   const prev = detected;
   detected = segResult.outlines.map((outline, i) => ({
     outline,
@@ -263,6 +266,10 @@ $<HTMLInputElement>('threshold').addEventListener('input', (e) => {
   $('threshold-val').textContent = (e.target as HTMLInputElement).value;
 });
 $<HTMLInputElement>('threshold').addEventListener('change', () => runSegmentation());
+$<HTMLInputElement>('smoothing').addEventListener('input', (e) => {
+  $('smoothing-val').textContent = `${(e.target as HTMLInputElement).value} mm`;
+});
+$<HTMLInputElement>('smoothing').addEventListener('change', () => runSegmentation());
 
 // Touch-up brush on the top-down view.
 type BrushMode = 'off' | 'erase' | 'add';

@@ -36,8 +36,11 @@
       <h2><span class="num">2</span> Take a photo</h2>
       <p>Shoot from straight above in soft, even light. Soft, even light works best. Shadows are mostly ignored, but hard, dark shadows can still sneak in, and you can erase them with the touch-up brush. White, very light or cyan items are hard to see on this paper.</p>
       <div class="row">
-        <label class="file-button primary">Take / choose photo
+        <label class="file-button primary">Take photo
           <input type="file" id="photo-input" accept="image/*" capture="environment" hidden />
+        </label>
+        <label class="file-button">Choose photo
+          <input type="file" id="photo-choose" accept="image/*" hidden />
         </label>
         <label>Reference
           <select id="ref-mode">
@@ -69,6 +72,8 @@
           <div class="row">
             <label>Sensitivity <input type="range" id="threshold" min="0.05" max="0.6" step="0.01" value="0.25" /></label>
             <span id="threshold-val">0.25</span>
+            <label>Smoothing <input type="range" id="smoothing" min="0" max="3" step="0.25" value="1" /></label>
+            <span id="smoothing-val">1 mm</span>
           </div>
         </div>
       </div>

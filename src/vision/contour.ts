@@ -100,3 +100,64 @@ export function simplifyClosed(pts: Point[], eps: number): Point[] {
   const b = dpOpen(pts.slice(far).concat([pts[0]]), eps);
   return a.slice(0, -1).concat(b.slice(0, -1));
 }
+
+/** Resamples a closed polygon at (roughly) equal spacing along its perimeter. */
+export function resampleClosed(pts: Point[], spacing: number): Point[] {
+  const n = pts.length;
+  let perimeter = 0;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    perimeter += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  const count = Math.max(8, Math.round(perimeter / spacing));
+  const step = perimeter / count;
+  const out: Point[] = [];
+  let seg = 0, segStart = 0;
+  let segLen = Math.hypot(pts[1 % n].x - pts[0].x, pts[1 % n].y - pts[0].y);
+  for (let k = 0; k < count; k++) {
+    const d = k * step;
+    while (d > segStart + segLen && seg < n - 1) {
+      segStart += segLen;
+      seg++;
+      const a = pts[seg], b = pts[(seg + 1) % n];
+      segLen = Math.hypot(b.x - a.x, b.y - a.y);
+    }
+    const a = pts[seg], b = pts[(seg + 1) % n];
+    const t = segLen > 0 ? Math.min(1, (d - segStart) / segLen) : 0;
+    out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  }
+  return out;
+}
+
+/**
+ * Smooths a closed outline: resample evenly, then apply a circular Gaussian filter.
+ * Removes pixel staircase and edge noise; corners become rounded with radius ~sigma.
+ * @param sigma smoothing strength in the same units as the points
+ */
+export function smoothClosed(pts: Point[], sigma: number, spacing: number): Point[] {
+  if (sigma <= 0 || pts.length < 4) return pts.slice();
+  const p = resampleClosed(pts, spacing);
+  const n = p.length;
+  const s = sigma / spacing; // sigma in samples
+  const r = Math.min(Math.floor(n / 2) - 1, Math.ceil(3 * s));
+  if (r < 1) return p;
+  const kernel: number[] = [];
+  let sum = 0;
+  for (let k = -r; k <= r; k++) {
+    const v = Math.exp(-(k * k) / (2 * s * s));
+    kernel.push(v);
+    sum += v;
+  }
+  const out: Point[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let x = 0, y = 0;
+    for (let k = -r; k <= r; k++) {
+      const q = p[(((i + k) % n) + n) % n];
+      const wgt = kernel[k + r];
+      x += q.x * wgt;
+      y += q.y * wgt;
+    }
+    out[i] = { x: x / sum, y: y / sum };
+  }
+  return out;
+}
