@@ -62,14 +62,15 @@ button.active { background: var(--accent); color: var(--accent-text); border-col
 button:disabled { opacity: 0.5; cursor: default; }
 .primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 input[type="number"] { width: 5.5em; padding: 4px 6px; }
-.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-@media (max-width: 800px) { .two-col { grid-template-columns: 1fr; } }
+.two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.two-col > * { min-width: 0; }
+@media (max-width: 800px) { .two-col { grid-template-columns: minmax(0, 1fr); } }
 canvas { width: 100%; display: block; background: var(--canvas-bg); border-radius: 8px; touch-action: none; }
 #viewer { height: 420px; border-radius: 8px; overflow: hidden; background: var(--canvas-bg); }
 #viewer canvas { border-radius: 0; }
 .status { color: var(--muted); margin: 6px 0; }
 .hint { color: var(--muted); font-size: 0.9rem; }
-.settings { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 14px; }
+.settings { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 6px 14px; }
 .settings small { color: var(--muted); }
 table.items { width: 100%; border-collapse: collapse; margin-top: 8px; }
 table.items th { text-align: left; color: var(--muted); font-weight: normal; font-size: 0.85rem; }
@@ -80,3 +81,12 @@ table.items button { padding: 2px 8px; }
 #warnings { margin: 8px 0; padding: 0; list-style: none; }
 #warnings li { background: var(--warn-bg); color: var(--warn-text); padding: 6px 10px; border-radius: 6px; margin-bottom: 4px; }
 details { margin-top: 8px; color: var(--muted); }
+.item-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.item-card { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--bg); }
+.item-head { display: flex; align-items: center; gap: 8px; }
+.item-head .name { flex: 1; min-width: 0; font: inherit; color: inherit; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+.item-head input[type="checkbox"] { width: 20px; height: 20px; }
+.item-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 8px; }
+.item-controls .group { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.item-controls button { padding: 4px 9px; min-width: 34px; }
+.item-controls input[type="number"] { width: 4.5em; }

@@ -1,5 +1,5 @@
 import type { CrossSection, Manifold, ManifoldToplevel } from 'manifold-3d';
-import { BinSettings, GF, Item, binOuterSize, notchCentre, placedLoops, requiredHeightUnits } from './layout';
+import { BinSettings, GF, Item, binOuterSize, placedLoops, placedNotches, requiredHeightUnits } from './layout';
 
 /** Tracks WASM objects so intermediates can be freed in one go. */
 class Scope {
@@ -96,10 +96,9 @@ export function buildBin(wasm: ManifoldToplevel, items: Item[], settings: BinSet
     // Top view uses y down; the model uses y up, so flip.
     const polys = placedLoops(item).map((l) => l.map((p) => [p.x, -p.y] as [number, number]));
     let shape = s.t(s.t(s.t(new CrossSection(polys, 'NonZero')).offset(settings.clearance, 'Round', 2, SEGS)).simplify(0.02));
-    const nc = notchCentre(item);
-    if (nc) {
+    for (const nc of placedNotches(item)) {
       const circle = s.t(s.t(CrossSection.circle(settings.fingerRadius, SEGS)).translate([nc.x, -nc.y]));
-      // Notch is cut separately so it can stop a little shallower than very deep pockets.
+      // Notches are cut separately so they can stop a little shallower than very deep pockets.
       const notchDepth = Math.min(item.depth, Math.max(8, item.depth * 0.8));
       cuts.push(s.t(s.t(circle.extrude(cutTop - (top - notchDepth))).translate([0, 0, top - notchDepth])));
       shape = s.t(shape.add(circle));

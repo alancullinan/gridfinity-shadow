@@ -10,14 +10,16 @@ import {
   BinSettings,
   GF,
   Item,
-  NotchSide,
   autoArrange,
   bestOrientation,
   binOuterSize,
   centreLoops,
   defaultSettings,
   fitBinToItems,
-  notchCentre,
+  nearestOnLoops,
+  placedNotches,
+  suggestNotch,
+  toItemCoords,
   placedLoops,
 } from './layout';
 import { buildBin, toStl } from './gridfinity';
@@ -363,13 +365,18 @@ function renderDetected() {
   const body = $('detected-body');
   body.innerHTML = '';
   detected.forEach((d, i) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td><span class="swatch" style="background:${COLORS[i % COLORS.length]}"></span> ${i + 1}</td>
-      <td><input type="checkbox" ${d.use ? 'checked' : ''}></td>
-      <td><input type="text"></td>
-      <td>${d.outline.bbox.w.toFixed(1)} × ${d.outline.bbox.h.toFixed(1)}</td>
-      <td><input type="number" min="1" max="150" step="0.5" value="${d.depth}"></td>`;
-    const [use, name, depth] = tr.querySelectorAll('input');
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    card.innerHTML = `<div class="item-head">
+        <input type="checkbox" title="Use this outline" ${d.use ? 'checked' : ''}>
+        <span class="swatch" style="background:${COLORS[i % COLORS.length]}"></span><b>${i + 1}</b>
+        <input type="text" class="name" aria-label="Name">
+      </div>
+      <div class="item-controls">
+        <span class="hint">${d.outline.bbox.w.toFixed(1)} × ${d.outline.bbox.h.toFixed(1)} mm</span>
+        <label>Depth <input type="number" min="1" max="150" step="0.5" value="${d.depth}"> mm</label>
+      </div>`;
+    const [use, name, depth] = card.querySelectorAll('input');
     name.value = d.name;
     use.addEventListener('change', () => {
       d.use = use.checked;
@@ -377,7 +384,7 @@ function renderDetected() {
     });
     name.addEventListener('input', () => (d.name = name.value));
     depth.addEventListener('input', () => (d.depth = +depth.value || d.depth));
-    body.appendChild(tr);
+    body.appendChild(card);
   });
 }
 
@@ -386,7 +393,7 @@ $('add-items').addEventListener('click', () => {
   if (!chosen.length) return;
   for (const d of chosen) {
     const { loops } = centreLoops(d.outline.loops);
-    items.push({ id: nextId++, name: d.name, loops, depth: d.depth, x: 0, y: 0, rotation: bestOrientation(loops), notch: 'none' });
+    items.push({ id: nextId++, name: d.name, loops, depth: d.depth, x: 0, y: 0, rotation: bestOrientation(loops), notches: [] });
   }
   arrange();
   $('step-bin').scrollIntoView({ behavior: 'smooth' });
@@ -457,7 +464,7 @@ $('add-test').addEventListener('click', () => {
     x: 0,
     y: 0,
     rotation: 0,
-    notch: 'top',
+    notches: [{ x: 0, y: -h / 2 }],
   });
   arrange();
 });
@@ -466,38 +473,55 @@ function renderItems() {
   const body = $('bin-items');
   body.innerHTML = '';
   $('empty-bin').hidden = items.length > 0;
-  for (const it of items) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td><input type="text"></td>
-      <td><input type="number" min="1" max="150" step="0.5" value="${it.depth}"></td>
-      <td><select>${['none', 'top', 'bottom', 'left', 'right'].map((n) => `<option ${n === it.notch ? 'selected' : ''}>${n}</option>`).join('')}</select></td>
-      <td><button data-r="-90" title="Rotate left">⟲</button> <button data-r="90" title="Rotate right">⟳</button></td>
-      <td><button data-del title="Remove">✕</button></td>`;
-    const [name, depth] = tr.querySelectorAll('input');
+  items.forEach((it, idx) => {
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    card.innerHTML = `<div class="item-head">
+        <span class="swatch" style="background:${COLORS[idx % COLORS.length]}"></span>
+        <input type="text" class="name" aria-label="Name">
+        <button data-del title="Remove from bin" aria-label="Remove">✕</button>
+      </div>
+      <div class="item-controls">
+        <label>Depth <input type="number" min="1" max="150" step="0.5" value="${it.depth}"> mm</label>
+        <span class="group">Finger notches
+          <button data-n="-1" aria-label="Remove a notch" ${it.notches.length ? '' : 'disabled'}>−</button>
+          <b>${it.notches.length}</b>
+          <button data-n="1" aria-label="Add a notch">+</button></span>
+        <span class="group">Rotate
+          <button data-r="-90" title="Rotate 90° left">⟲ 90°</button><button data-r="-15" title="Rotate 15° left">⟲ 15°</button><button data-r="15" title="Rotate 15° right">15° ⟳</button><button data-r="90" title="Rotate 90° right">90° ⟳</button></span>
+      </div>`;
+    const [name, depth] = card.querySelectorAll('input');
     name.value = it.name;
-    name.addEventListener('input', () => (it.name = name.value));
+    name.addEventListener('input', () => {
+      it.name = name.value;
+      drawLayout();
+    });
     depth.addEventListener('change', () => {
       it.depth = Math.max(1, +depth.value || it.depth);
       changed();
     });
-    tr.querySelector('select')!.addEventListener('change', (e) => {
-      it.notch = (e.target as HTMLSelectElement).value as NotchSide;
-      manualLayoutChanged();
-    });
-    tr.querySelectorAll<HTMLButtonElement>('button[data-r]').forEach((b) =>
+    card.querySelectorAll<HTMLButtonElement>('button[data-n]').forEach((b) =>
+      b.addEventListener('click', () => {
+        if (+b.dataset.n! > 0) it.notches.push(suggestNotch(it));
+        else it.notches.pop();
+        renderItems();
+        manualLayoutChanged();
+      }),
+    );
+    card.querySelectorAll<HTMLButtonElement>('button[data-r]').forEach((b) =>
       b.addEventListener('click', () => {
         it.rotation += +b.dataset.r!;
         manualLayoutChanged();
       }),
     );
-    tr.querySelector('button[data-del]')!.addEventListener('click', () => {
+    card.querySelector('button[data-del]')!.addEventListener('click', () => {
       items.splice(items.indexOf(it), 1);
       renderItems();
       if (settings.autoSize) arrange();
       else changed();
     });
-    body.appendChild(tr);
-  }
+    body.appendChild(card);
+  });
 }
 
 const layoutCanvas = $<HTMLCanvasElement>('layout-canvas');
@@ -564,12 +588,25 @@ function drawLayout() {
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = color;
     ctx.stroke();
-    const nc = notchCentre(it);
-    if (nc) {
+    for (const nc of placedNotches(it)) {
       ctx.beginPath();
       ctx.arc(tx(nc.x), ty(nc.y), settings.fingerRadius * scale, 0, Math.PI * 2);
       ctx.fillStyle = color + '55';
       ctx.fill();
+      ctx.setLineDash([4, 3]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = color;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Drag handle in the middle.
+      const hr = 6 * Math.min(2, devicePixelRatio);
+      ctx.beginPath();
+      ctx.arc(tx(nc.x), ty(nc.y), hr, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = color;
+      ctx.stroke();
     }
     ctx.fillStyle = dark ? '#fff' : '#111';
     ctx.font = `${Math.round(13 * Math.min(2, devicePixelRatio))}px sans-serif`;
@@ -591,6 +628,7 @@ function pointInLoops(p: Point, loops: Point[][]): boolean {
 
 {
   let drag: { item: Item; start: Point; x0: number; y0: number; rot0: number; rotate: boolean } | null = null;
+  let notchDrag: { item: Item; index: number } | null = null;
   const toMm = (e: PointerEvent): Point => {
     const b = layoutCanvas.getBoundingClientRect();
     const px = ((e.clientX - b.left) / b.width) * layoutCanvas.width;
@@ -599,6 +637,22 @@ function pointInLoops(p: Point, loops: Point[][]): boolean {
   };
   layoutCanvas.addEventListener('pointerdown', (e) => {
     const p = toMm(e);
+    // Notch handles take priority: grab within the notch circle (or 6 mm for small notches).
+    const grab = Math.max(6, settings.fingerRadius * 0.8);
+    let bestD = grab;
+    notchDrag = null;
+    for (const it of items)
+      placedNotches(it).forEach((nc, index) => {
+        const d = Math.hypot(nc.x - p.x, nc.y - p.y);
+        if (d < bestD) {
+          bestD = d;
+          notchDrag = { item: it, index };
+        }
+      });
+    if (notchDrag) {
+      layoutCanvas.setPointerCapture(e.pointerId);
+      return;
+    }
     for (let i = items.length - 1; i >= 0; i--) {
       if (pointInLoops(p, placedLoops(items[i]))) {
         const it = items[i];
@@ -609,6 +663,13 @@ function pointInLoops(p: Point, loops: Point[][]): boolean {
     }
   });
   layoutCanvas.addEventListener('pointermove', (e) => {
+    if (notchDrag) {
+      // Slide the notch along the item's outline, following the finger.
+      const it = notchDrag.item;
+      it.notches[notchDrag.index] = toItemCoords(nearestOnLoops(placedLoops(it), toMm(e)), it);
+      drawLayout();
+      return;
+    }
     if (!drag) return;
     const p = toMm(e);
     const it = drag.item;
@@ -623,8 +684,9 @@ function pointInLoops(p: Point, loops: Point[][]): boolean {
     drawLayout();
   });
   const end = () => {
-    if (!drag) return;
+    if (!drag && !notchDrag) return;
     drag = null;
+    notchDrag = null;
     manualLayoutChanged();
   };
   layoutCanvas.addEventListener('pointerup', end);

@@ -1,7 +1,5 @@
 import type { Point } from './sheet';
 
-export type NotchSide = 'none' | 'top' | 'bottom' | 'left' | 'right';
-
 export interface Item {
   id: number;
   name: string;
@@ -14,7 +12,8 @@ export interface Item {
   y: number;
   /** Rotation in degrees (clockwise in the top view). */
   rotation: number;
-  notch: NotchSide;
+  /** Finger notch centres, on the outline, in the item's own coordinates (they rotate with it). */
+  notches: Point[];
 }
 
 export interface BinSettings {
@@ -124,10 +123,13 @@ interface Box {
 /** Bounding box of an item at a rotation, grown on the notch side so the finger notch fits too. */
 function footprintBBox(item: Item, rot: number, notchR: number) {
   const b = rotatedBBox(item.loops, rot);
-  if (item.notch === 'top') b.minY -= notchR;
-  if (item.notch === 'bottom') b.maxY += notchR;
-  if (item.notch === 'left') b.minX -= notchR;
-  if (item.notch === 'right') b.maxX += notchR;
+  for (const n of item.notches) {
+    const p = transformPoint(n, { x: 0, y: 0, rotation: rot });
+    b.minX = Math.min(b.minX, p.x - notchR);
+    b.maxX = Math.max(b.maxX, p.x + notchR);
+    b.minY = Math.min(b.minY, p.y - notchR);
+    b.maxY = Math.max(b.maxY, p.y + notchR);
+  }
   b.w = b.maxX - b.minX;
   b.h = b.maxY - b.minY;
   return b;
@@ -263,26 +265,55 @@ export function fitBinToItems(items: Item[], settings: BinSettings): void {
   }
 }
 
-/** Centre of the finger notch for an item, in bin top-view coordinates, or null. */
-export function notchCentre(item: Item): Point | null {
-  if (item.notch === 'none') return null;
-  const dir = { top: { x: 0, y: -1 }, bottom: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } }[item.notch];
-  const loops = placedLoops(item);
-  const o = { x: item.x, y: item.y };
-  // Furthest intersection of a ray from the item centre with the outline.
-  let bestT = 0;
-  for (const l of loops) {
+/** Finger notch centres in bin top-view coordinates. */
+export function placedNotches(item: Item): Point[] {
+  return item.notches.map((n) => transformPoint(n, item));
+}
+
+/** Converts a top-view point to the item's own coordinates. */
+export function toItemCoords(p: Point, item: Pick<Item, 'x' | 'y' | 'rotation'>): Point {
+  const a = (-item.rotation * Math.PI) / 180;
+  const c = Math.cos(a), s = Math.sin(a);
+  const dx = p.x - item.x, dy = p.y - item.y;
+  return { x: dx * c - dy * s, y: dx * s + dy * c };
+}
+
+/** Closest point on any of the loops' edges. */
+export function nearestOnLoops(loops: Point[][], p: Point): Point {
+  let best = p, bestD = Infinity;
+  for (const l of loops)
     for (let i = 0; i < l.length; i++) {
       const a = l[i], b = l[(i + 1) % l.length];
       const ex = b.x - a.x, ey = b.y - a.y;
-      const den = dir.x * ey - dir.y * ex;
-      if (Math.abs(den) < 1e-12) continue;
-      const t = ((a.x - o.x) * ey - (a.y - o.y) * ex) / den;
-      const u = ((a.x - o.x) * dir.y - (a.y - o.y) * dir.x) / den;
-      if (t > bestT && u >= 0 && u <= 1) bestT = t;
+      const len2 = ex * ex + ey * ey;
+      const t = len2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * ex + (p.y - a.y) * ey) / len2)) : 0;
+      const q = { x: a.x + ex * t, y: a.y + ey * t };
+      const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = q;
+      }
     }
-  }
-  return { x: o.x + dir.x * bestT, y: o.y + dir.y * bestT };
+  return best;
+}
+
+/**
+ * A new notch position for an item: the outline point nearest the middle of the item's top
+ * side as currently shown, or of another side if that one already has a notch.
+ */
+export function suggestNotch(item: Item): Point {
+  const b = rotatedBBox(placedLoops(item), 0);
+  const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2;
+  const sides = [
+    { x: cx, y: b.minY },
+    { x: cx, y: b.maxY },
+    { x: b.minX, y: cy },
+    { x: b.maxX, y: cy },
+  ];
+  const existing = placedNotches(item);
+  const target =
+    sides.find((sd) => existing.every((e) => Math.hypot(e.x - sd.x, e.y - sd.y) > 15)) ?? sides[0];
+  return toItemCoords(nearestOnLoops(placedLoops(item), target), item);
 }
 
 export function requiredHeightUnits(items: Item[], settings: BinSettings): number {

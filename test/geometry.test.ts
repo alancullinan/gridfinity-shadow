@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import Module, { ManifoldToplevel } from 'manifold-3d';
 import { buildBin, toStl } from '../src/gridfinity';
-import { Item, autoArrange, defaultSettings, fitBinToItems, requiredHeightUnits } from '../src/layout';
+import { Item, autoArrange, defaultSettings, fitBinToItems, nearestOnLoops, placedNotches, requiredHeightUnits, suggestNotch } from '../src/layout';
 
 let wasm: ManifoldToplevel;
 beforeAll(async () => {
@@ -10,7 +10,7 @@ beforeAll(async () => {
 });
 
 const rect = (w: number, h: number) => [[{ x: -w / 2, y: -h / 2 }, { x: w / 2, y: -h / 2 }, { x: w / 2, y: h / 2 }, { x: -w / 2, y: h / 2 }]];
-const item = (id: number, w: number, h: number, depth = 10): Item => ({ id, name: `i${id}`, loops: rect(w, h), depth, x: 0, y: 0, rotation: 0, notch: 'none' });
+const item = (id: number, w: number, h: number, depth = 10): Item => ({ id, name: `i${id}`, loops: rect(w, h), depth, x: 0, y: 0, rotation: 0, notches: [] });
 
 describe('layout', () => {
   it('fits a single small item in a 1x1 bin', () => {
@@ -44,7 +44,7 @@ describe('layout', () => {
   });
   it('leaves room for finger notches', () => {
     const s = defaultSettings();
-    const it1 = { ...item(1, 70, 25), notch: 'top' as const };
+    const it1 = { ...item(1, 70, 25), notches: [{ x: 0, y: -12.5 }, { x: 35, y: 0 }] };
     autoArrange([it1], s);
     const b = buildBin(wasm, [it1], s);
     expect(b.warnings).toEqual([]);
@@ -61,6 +61,21 @@ describe('layout', () => {
     expect(b.warnings).toEqual([]);
     b.manifold.delete();
   });
+  it('places notches on the outline and rotates them with the item', () => {
+    const it1 = { ...item(1, 60, 20), x: 10, y: 5, rotation: 90 };
+    expect(nearestOnLoops(it1.loops, { x: 3, y: -40 })).toEqual({ x: 3, y: -10 });
+    // Item rotated 90°: its top side in the view is its own left (-x) side.
+    const n = suggestNotch(it1);
+    expect(n.x).toBeCloseTo(-30);
+    expect(n.y).toBeCloseTo(0);
+    it1.notches.push(n);
+    const p = placedNotches(it1)[0];
+    expect(p.x).toBeCloseTo(10);
+    expect(p.y).toBeCloseTo(5 - 30);
+    // A second suggestion goes to another side.
+    const n2 = suggestNotch(it1);
+    expect(Math.hypot(n2.x - n.x, n2.y - n.y)).toBeGreaterThan(15);
+  });
   it('computes height units from depth', () => {
     const s = defaultSettings();
     expect(requiredHeightUnits([item(1, 10, 10, 20)], s)).toBe(4); // 4.75+1.2+20 = 25.95 -> 4u
@@ -70,7 +85,7 @@ describe('layout', () => {
 describe('bin geometry', () => {
   it('builds a valid, watertight 2x1 bin with a pocket and notch', () => {
     const s = { ...defaultSettings(), autoSize: false, unitsX: 2, unitsY: 1, unitsZ: 3, magnets: true };
-    const it1 = { ...item(1, 60, 20, 15), notch: 'bottom' as const };
+    const it1 = { ...item(1, 60, 20, 15), notches: [{ x: 0, y: 10 }] };
     const r = buildBin(wasm, [it1], s);
     const m = r.manifold;
     expect((m as unknown as { status(): { value: number } }).status().value).toBe(0);

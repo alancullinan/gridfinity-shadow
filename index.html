@@ -79,10 +79,7 @@
       </div>
       <div id="detected" hidden>
         <h3>Detected outlines</h3>
-        <table class="items">
-          <thead><tr><th></th><th>Use</th><th>Name</th><th>Size (mm)</th><th>Depth (mm)</th></tr></thead>
-          <tbody id="detected-body"></tbody>
-        </table>
+        <div id="detected-body" class="item-list"></div>
         <div class="row"><button id="add-items" class="primary">Add selected to bin</button></div>
       </div>
     </section>
@@ -92,7 +89,7 @@
       <div class="two-col">
         <div>
           <canvas id="layout-canvas"></canvas>
-          <p class="hint">Drag items to move them. Hold Shift and drag to rotate.</p>
+          <p class="hint">Drag items to move them (on a computer, Shift-drag rotates). Drag a notch's white dot to slide it around the item. Add notches with <b>+</b> in the item list.</p>
         </div>
         <div>
           <div class="settings">
@@ -108,10 +105,7 @@
             <label><input type="checkbox" id="lip" checked /> Stacking lip</label>
           </div>
           <div class="row"><button id="arrange">Auto-arrange</button><button id="add-test">Add test shape</button></div>
-          <table class="items">
-            <thead><tr><th>Name</th><th>Depth</th><th>Notch</th><th>Rotate</th><th></th></tr></thead>
-            <tbody id="bin-items"></tbody>
-          </table>
+          <div id="bin-items" class="item-list"></div>
           <p id="empty-bin" class="hint">No items yet. Add some from a photo, or add a test shape.</p>
         </div>
       </div>
