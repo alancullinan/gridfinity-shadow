@@ -43,15 +43,24 @@ export function markerCenters(sheet: SheetSpec): Point[] {
   ];
 }
 
+/**
+ * How far the analysed region extends past the outermost grid lines, so those lines are fully
+ * inside the image (they are used to tell shadows from items).
+ */
+export const REGION_PAD = 2;
+
 /** The region of the sheet that gets rectified and searched for items. */
 export function workRegion(sheet: SheetSpec): Rect {
   return {
-    x: SHEET_MARGIN,
-    y: SHEET_MARGIN,
-    w: sheet.width - 2 * SHEET_MARGIN,
-    h: sheet.height - 2 * SHEET_MARGIN,
+    x: SHEET_MARGIN - REGION_PAD,
+    y: SHEET_MARGIN - REGION_PAD,
+    w: sheet.width - 2 * (SHEET_MARGIN - REGION_PAD),
+    h: sheet.height - 2 * (SHEET_MARGIN - REGION_PAD),
   };
 }
+
+/** The template's grid as seen in the rectified work region. */
+export const TEMPLATE_GRID = { pitch: GRID_PITCH, offsetX: REGION_PAD, offsetY: REGION_PAD };
 
 /** Areas (markers plus a little padding) that must be ignored when looking for items. */
 export function ignoreZones(sheet: SheetSpec): Rect[] {

@@ -1,6 +1,6 @@
 import Module, { Manifold, ManifoldToplevel } from 'manifold-3d';
 import wasmUrl from 'manifold-3d/manifold.wasm?url';
-import { Point, Rect, SHEETS, SheetSpec, ignoreZones, markerCenters, workRegion } from './sheet';
+import { TEMPLATE_GRID, Point, Rect, SHEETS, SheetSpec, ignoreZones, markerCenters, workRegion } from './sheet';
 import { downloadTemplateSvg, openPrintableTemplate } from './template';
 import { RGBAImage } from './vision/image';
 import { detectMarkers } from './vision/markers';
@@ -16,6 +16,7 @@ import {
   binOuterSize,
   centreLoops,
   defaultSettings,
+  fitBinToItems,
   notchCentre,
   placedLoops,
 } from './layout';
@@ -38,6 +39,9 @@ let markersFound = true;
 let rectified: RGBAImage | null = null;
 let segResult: SegmentResult | null = null;
 let rectOrigin: Point = { x: 0, y: 0 };
+let segIgnore: Rect[] = [];
+/** Brush corrections on the top-down image: 1 = item, -1 = paper, 0 = automatic. */
+let edits: Int8Array | null = null;
 
 interface Detected {
   outline: DetectedOutline;
@@ -147,8 +151,18 @@ function processPhoto() {
     return;
   }
   rectOrigin = { x: region.x, y: region.y };
+  segIgnore = ignore;
+  edits = new Int8Array(rectified.width * rectified.height);
+  runSegmentation();
+}
+
+/** Re-runs item detection on the current top-down image (after threshold changes or brush edits). */
+function runSegmentation() {
+  if (!rectified) return;
   const threshold = +$<HTMLInputElement>('threshold').value;
-  segResult = segmentItems(rectified, { ppm: PPM, origin: rectOrigin, ignore, threshold });
+  // The printed template's grid starts at the work region's corner; own paper has no known grid.
+  const grid = refMode() === 'template' ? TEMPLATE_GRID : undefined;
+  segResult = segmentItems(rectified, { ppm: PPM, origin: rectOrigin, ignore: segIgnore, threshold, grid, edits: edits ?? undefined });
   const prev = detected;
   detected = segResult.outlines.map((outline, i) => ({
     outline,
@@ -169,6 +183,7 @@ function processPhoto() {
 }
 
 const photoCanvas = $<HTMLCanvasElement>('photo-canvas');
+const rectCanvas = $<HTMLCanvasElement>('rect-canvas');
 function photoScale() {
   return photo ? Math.min(1, 1100 / Math.max(photo.width, photo.height)) : 1;
 }
@@ -247,9 +262,60 @@ function drawPhoto() {
 $<HTMLInputElement>('threshold').addEventListener('input', (e) => {
   $('threshold-val').textContent = (e.target as HTMLInputElement).value;
 });
-$<HTMLInputElement>('threshold').addEventListener('change', () => processPhoto());
+$<HTMLInputElement>('threshold').addEventListener('change', () => runSegmentation());
 
-const rectCanvas = $<HTMLCanvasElement>('rect-canvas');
+// Touch-up brush on the top-down view.
+type BrushMode = 'off' | 'erase' | 'add';
+let brushMode: BrushMode = 'off';
+const brushButtons = document.querySelectorAll<HTMLButtonElement>('[data-brush]');
+brushButtons.forEach((b) =>
+  b.addEventListener('click', () => {
+    const mode = b.dataset.brush as BrushMode;
+    brushMode = brushMode === mode ? 'off' : mode;
+    brushButtons.forEach((o) => o.classList.toggle('active', o.dataset.brush === brushMode));
+    rectCanvas.style.cursor = brushMode === 'off' ? '' : 'crosshair';
+  }),
+);
+$('brush-clear').addEventListener('click', () => {
+  if (!edits) return;
+  edits.fill(0);
+  runSegmentation();
+});
+{
+  let painting = false;
+  const paint = (e: PointerEvent) => {
+    if (!edits || !rectified) return;
+    const b = rectCanvas.getBoundingClientRect();
+    const cx = ((e.clientX - b.left) / b.width) * rectCanvas.width;
+    const cy = ((e.clientY - b.top) / b.height) * rectCanvas.height;
+    const r = (+$<HTMLInputElement>('brush-size').value / 2) * PPM;
+    const val = brushMode === 'erase' ? -1 : 1;
+    const w = rectified.width, h = rectified.height;
+    for (let y = Math.max(0, Math.floor(cy - r)); y <= Math.min(h - 1, Math.ceil(cy + r)); y++)
+      for (let x = Math.max(0, Math.floor(cx - r)); x <= Math.min(w - 1, Math.ceil(cx + r)); x++)
+        if ((x - cx) ** 2 + (y - cy) ** 2 <= r * r) edits[y * w + x] = val;
+    const ctx = rectCanvas.getContext('2d')!;
+    ctx.fillStyle = brushMode === 'erase' ? 'rgba(255,255,255,0.7)' : 'rgba(255,45,138,0.6)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  rectCanvas.addEventListener('pointerdown', (e) => {
+    if (brushMode === 'off') return;
+    painting = true;
+    rectCanvas.setPointerCapture(e.pointerId);
+    paint(e);
+  });
+  rectCanvas.addEventListener('pointermove', (e) => painting && paint(e));
+  const end = () => {
+    if (!painting) return;
+    painting = false;
+    runSegmentation();
+  };
+  rectCanvas.addEventListener('pointerup', end);
+  rectCanvas.addEventListener('pointercancel', end);
+}
+
 function drawRectified() {
   if (!rectified || !segResult) return;
   rectCanvas.width = rectified.width;
@@ -344,21 +410,31 @@ function writeUnits() {
 for (const id of ['units-x', 'units-y', 'units-z', 'clearance', 'spacing', 'finger', 'magnets', 'lip', 'max-units']) {
   $(id).addEventListener('change', () => {
     readSettings();
-    if (settings.autoSize && ['clearance', 'spacing', 'max-units'].includes(id)) arrange();
-    else changed();
+    if (settings.autoSize && ['clearance', 'spacing', 'max-units', 'finger'].includes(id)) arrange();
+    else {
+      if (!settings.autoSize) layoutWarnings = [];
+      changed();
+    }
   });
 }
 $('auto-size').addEventListener('change', () => {
   readSettings();
+  layoutWarnings = [];
   if (settings.autoSize) arrange();
   else changed();
 });
 
+/** Layout problems, shown alongside the model's own warnings. */
+let layoutWarnings: string[] = [];
+
 function arrange() {
   readSettings();
-  if (!autoArrange(items, settings)) {
-    setWarnings(['The items do not fit. Try a larger bin, a bigger max size or less clearance.']);
-  }
+  const r = autoArrange(items, settings);
+  layoutWarnings = !r.ok
+    ? [`The items don't fit in a ${settings.unitsX} × ${settings.unitsY} bin. Turn on auto size, make the bin bigger or reduce the clearance.`]
+    : r.exceedsBed
+      ? [`The items need a ${settings.unitsX} × ${settings.unitsY} bin, which is bigger than your ${settings.maxUnits}u bed limit. Check the outlines (a shadow can make one too big), or split the items across bins.`]
+      : [];
   writeUnits();
   renderItems();
   changed();
@@ -399,12 +475,12 @@ function renderItems() {
     });
     tr.querySelector('select')!.addEventListener('change', (e) => {
       it.notch = (e.target as HTMLSelectElement).value as NotchSide;
-      changed();
+      manualLayoutChanged();
     });
     tr.querySelectorAll<HTMLButtonElement>('button[data-r]').forEach((b) =>
       b.addEventListener('click', () => {
         it.rotation += +b.dataset.r!;
-        changed();
+        manualLayoutChanged();
       }),
     );
     tr.querySelector('button[data-del]')!.addEventListener('click', () => {
@@ -542,7 +618,7 @@ function pointInLoops(p: Point, loops: Point[][]): boolean {
   const end = () => {
     if (!drag) return;
     drag = null;
-    changed();
+    manualLayoutChanged();
   };
   layoutCanvas.addEventListener('pointerup', end);
   layoutCanvas.addEventListener('pointercancel', end);
@@ -552,6 +628,19 @@ new ResizeObserver(() => drawLayout()).observe(layoutCanvas);
 // ---------------------------------------------------------------------------------------
 // Step 4: model
 // ---------------------------------------------------------------------------------------
+/** After a manual move or rotate: in auto-size mode, resize the bin around the arrangement. */
+function manualLayoutChanged() {
+  if (settings.autoSize) {
+    fitBinToItems(items, settings);
+    layoutWarnings =
+      Math.max(settings.unitsX, settings.unitsY) > settings.maxUnits
+        ? [`This arrangement needs a ${settings.unitsX} × ${settings.unitsY} bin, which is bigger than your ${settings.maxUnits}u bed limit.`]
+        : [];
+    writeUnits();
+  }
+  changed();
+}
+
 let regenTimer = 0;
 function changed() {
   drawLayout();
@@ -571,7 +660,7 @@ function regenerate() {
     currentModel?.delete();
     currentModel = res.manifold;
     preview?.show(currentModel);
-    setWarnings(res.warnings);
+    setWarnings([...layoutWarnings, ...res.warnings]);
     const [w, d, h] = res.size;
     $('model-info').textContent = `${settings.unitsX} × ${settings.unitsY} × ${res.unitsZ}u · ${w.toFixed(1)} × ${d.toFixed(1)} × ${h.toFixed(1)} mm · ${currentModel.numTri().toLocaleString()} triangles · ${Math.round(performance.now() - t0)} ms`;
     $<HTMLButtonElement>('download-stl').disabled = false;

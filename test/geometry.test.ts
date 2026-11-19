@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import Module, { ManifoldToplevel } from 'manifold-3d';
 import { buildBin, toStl } from '../src/gridfinity';
-import { Item, autoArrange, defaultSettings, requiredHeightUnits } from '../src/layout';
+import { Item, autoArrange, defaultSettings, fitBinToItems, requiredHeightUnits } from '../src/layout';
 
 let wasm: ManifoldToplevel;
 beforeAll(async () => {
@@ -15,18 +15,51 @@ const item = (id: number, w: number, h: number, depth = 10): Item => ({ id, name
 describe('layout', () => {
   it('fits a single small item in a 1x1 bin', () => {
     const s = defaultSettings();
-    expect(autoArrange([item(1, 30, 20)], s)).toBe(true);
+    expect(autoArrange([item(1, 30, 20)], s).ok).toBe(true);
     expect([s.unitsX, s.unitsY]).toEqual([1, 1]);
   });
   it('packs several items into few cells without overlap', () => {
     const s = defaultSettings();
     const items = [item(1, 120, 20), item(2, 60, 30), item(3, 50, 25), item(4, 20, 20)];
-    expect(autoArrange(items, s)).toBe(true);
+    expect(autoArrange(items, s).ok).toBe(true);
     expect(s.unitsX * s.unitsY).toBeLessThanOrEqual(8);
     expect(Math.max(s.unitsX, s.unitsY)).toBeLessThanOrEqual(5);
     const r = buildBin(wasm, items, s);
     expect(r.warnings).toEqual([]);
     r.manifold.delete();
+  });
+  it('grows the bin for a large item', () => {
+    const s = defaultSettings();
+    expect(autoArrange([item(1, 100, 100)], s)).toEqual({ ok: true, exceedsBed: false });
+    expect([s.unitsX, s.unitsY]).toEqual([3, 3]);
+  });
+  it('goes past the bed limit (with a flag) rather than leaving the bin too small', () => {
+    const s = defaultSettings(); // maxUnits 5 = 207.5 mm
+    const r = autoArrange([item(1, 230, 30)], s);
+    expect(r).toEqual({ ok: true, exceedsBed: true });
+    expect(Math.max(s.unitsX, s.unitsY)).toBe(6);
+    const b = buildBin(wasm, [item(1, 230, 30)].map((i) => ({ ...i, rotation: s.unitsX >= s.unitsY ? 0 : 90 })), s);
+    expect(b.warnings).toEqual([]);
+    b.manifold.delete();
+  });
+  it('leaves room for finger notches', () => {
+    const s = defaultSettings();
+    const it1 = { ...item(1, 70, 25), notch: 'top' as const };
+    autoArrange([it1], s);
+    const b = buildBin(wasm, [it1], s);
+    expect(b.warnings).toEqual([]);
+    b.manifold.delete();
+  });
+  it('resizes and recentres to fit a manual arrangement', () => {
+    const s = defaultSettings();
+    const items = [item(1, 30, 20), item(2, 30, 20)];
+    items[1].x = 80; // dragged to the right: span 110 mm + margins = 118.5 mm -> 3u
+    fitBinToItems(items, s);
+    expect([s.unitsX, s.unitsY]).toEqual([3, 1]);
+    expect(items[0].x + items[1].x).toBeCloseTo(0);
+    const b = buildBin(wasm, items, s);
+    expect(b.warnings).toEqual([]);
+    b.manifold.delete();
   });
   it('computes height units from depth', () => {
     const s = defaultSettings();

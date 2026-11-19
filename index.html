@@ -34,7 +34,7 @@
 
     <section class="card" id="step-photo">
       <h2><span class="num">2</span> Take a photo</h2>
-      <p>Shoot from straight above in soft, even light. Turn the flash off and avoid hard shadows. Light-coloured or cyan items are hard to see on the paper.</p>
+      <p>Shoot from straight above in soft, even light. Soft, even light works best. Shadows are mostly ignored, but hard, dark shadows can still sneak in, and you can erase them with the touch-up brush. White, very light or cyan items are hard to see on this paper.</p>
       <div class="row">
         <label class="file-button primary">Take / choose photo
           <input type="file" id="photo-input" accept="image/*" capture="environment" hidden />
@@ -59,6 +59,13 @@
         <div>
           <h3>Top-down view &amp; outlines</h3>
           <canvas id="rect-canvas"></canvas>
+          <div class="row">
+            <span class="hint">Touch up:</span>
+            <button data-brush="erase" title="Paint over shadows or anything that isn't part of an item">Erase</button>
+            <button data-brush="add" title="Paint over parts of an item that were missed">Add</button>
+            <label>Brush <input type="range" id="brush-size" min="2" max="30" step="1" value="8" /></label>
+            <button id="brush-clear">Clear touch-ups</button>
+          </div>
           <div class="row">
             <label>Sensitivity <input type="range" id="threshold" min="0.05" max="0.6" step="0.01" value="0.25" /></label>
             <span id="threshold-val">0.25</span>

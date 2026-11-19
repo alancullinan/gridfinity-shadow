@@ -26,11 +26,12 @@ await maker.setContent(`<html><body style="margin:0;background:#6d5a48;width:900
 <div style="perspective:1400px;width:900px;height:1200px;display:grid;place-items:center">
  <div style="position:relative;width:${mm(210)};height:${mm(297)};transform:rotateX(16deg) rotateY(-5deg) rotateZ(-7deg);box-shadow:0 10px 40px #0006">
   <div style="position:absolute;inset:0">${svg.replace('width="210mm" height="297mm"', `width="${210 * K}" height="${297 * K}"`)}</div>
-  <div style="position:absolute;left:${mm(40)};top:${mm(50)};width:${mm(90)};height:${mm(18)};background:#2b2f36;border-radius:${mm(4)}"></div>
-  <div style="position:absolute;left:${mm(130)};top:${mm(120)};width:${mm(30)};height:${mm(30)};background:#c0392b;border-radius:50%"></div>
-  <svg style="position:absolute;left:0;top:0" width="${210 * K}" height="${297 * K}" viewBox="0 0 210 297">
+  <div style="position:absolute;left:${mm(40)};top:${mm(50)};width:${mm(90)};height:${mm(18)};background:#2b2f36;border-radius:${mm(4)};filter:drop-shadow(${mm(2)} ${mm(2.5)} ${mm(1.5)} rgba(0,0,0,0.45))"></div>
+  <div style="position:absolute;left:${mm(130)};top:${mm(120)};width:${mm(30)};height:${mm(30)};background:#c0392b;border-radius:50%;filter:drop-shadow(${mm(2)} ${mm(2.5)} ${mm(1.5)} rgba(0,0,0,0.45))"></div>
+  <svg style="position:absolute;left:0;top:0;filter:drop-shadow(${mm(2)} ${mm(2.5)} ${mm(1.5)} rgba(0,0,0,0.45))" width="${210 * K}" height="${297 * K}" viewBox="0 0 210 297">
     <path d="M40 150 h14 v70 h46 v14 h-60 z" fill="#d68910"/>
   </svg>
+  <div style="position:absolute;left:${mm(170)};top:${mm(30)};width:${mm(25)};height:${mm(230)};background:#8d9299;border-radius:${mm(3)};${'filter:drop-shadow(' + mm(2) + ' ' + mm(2.5) + ' ' + mm(1.5) + ' rgba(0,0,0,0.45))'}"></div>
   <div style="position:absolute;inset:0;background:linear-gradient(120deg,#0000 40%,#0003)"></div>
  </div>
 </div></body></html>`);
@@ -66,9 +67,12 @@ await dl.saveAs(stlPath);
 console.log('stl bytes:', fs.statSync(stlPath).size);
 console.log('errors:', errors.length ? errors : 'none');
 
-// Expected: 90 x 18 rounded bar, 30 mm disc, 60 x 84 L-shape.
-const expected = [[90, 18], [30, 30], [60, 84]];
-let ok = sizes.length === 3;
+// Expected: 90 x 18 rounded bar, 30 mm disc, 60 x 84 L-shape, 25 x 230 grey bar (all with shadows).
+const expected = [[90, 18], [30, 30], [60, 84], [25, 230]];
+let ok = sizes.length === 4;
+const units = await page.evaluate(() => [window.__gt.settings.unitsX, window.__gt.settings.unitsY]);
+console.log('bin units:', units.join(' x '));
+if (Math.max(...units) < 6) ok = false; // the 230 mm bar needs at least 6 units
 for (const [ew, eh] of expected) {
   const hit = sizes.some(([w, h]) => Math.abs(w - ew) < 1.5 && Math.abs(h - eh) < 1.5);
   if (!hit) ok = false;

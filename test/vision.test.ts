@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SHEETS, markerCenters, workRegion, ignoreZones, MARKER_SIZE, GRID_PITCH } from '../src/sheet';
+import { TEMPLATE_GRID, SHEETS, markerCenters, workRegion, ignoreZones, MARKER_SIZE, GRID_PITCH } from '../src/sheet';
 import { computeHomography, applyHomography, rectify } from '../src/vision/homography';
 import { detectMarkers } from '../src/vision/markers';
 import { segmentItems } from '../src/vision/segment';
@@ -68,7 +68,7 @@ function analyse(rotate90: boolean) {
   const region = workRegion(sheet);
   const ppm = 4;
   const rect = rectify(photo, pts!, markerCenters(sheet), region, ppm);
-  return segmentItems(rect, { ppm, origin: region, ignore: ignoreZones(sheet), threshold: 0.25 });
+  return segmentItems(rect, { ppm, origin: region, ignore: ignoreZones(sheet), threshold: 0.25, grid: TEMPLATE_GRID });
 }
 
 describe('vision pipeline', () => {

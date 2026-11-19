@@ -58,6 +58,7 @@ button, .file-button, select, input[type="number"] {
   border-radius: 8px; padding: 6px 12px;
 }
 button, .file-button { cursor: pointer; }
+button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 button:disabled { opacity: 0.5; cursor: default; }
 .primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 input[type="number"] { width: 5.5em; padding: 4px 6px; }

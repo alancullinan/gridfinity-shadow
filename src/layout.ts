@@ -121,18 +121,30 @@ interface Box {
   oy: number;
 }
 
-function makeBox(item: Item, rot: number, pad: number): Box {
+/** Bounding box of an item at a rotation, grown on the notch side so the finger notch fits too. */
+function footprintBBox(item: Item, rot: number, notchR: number) {
   const b = rotatedBBox(item.loops, rot);
+  if (item.notch === 'top') b.minY -= notchR;
+  if (item.notch === 'bottom') b.maxY += notchR;
+  if (item.notch === 'left') b.minX -= notchR;
+  if (item.notch === 'right') b.maxX += notchR;
+  b.w = b.maxX - b.minX;
+  b.h = b.maxY - b.minY;
+  return b;
+}
+
+function makeBox(item: Item, rot: number, pad: number, notchR: number): Box {
+  const b = footprintBBox(item, rot, notchR);
   return { item, rot, w: b.w + pad, h: b.h + pad, ox: -(b.minX + b.maxX) / 2, oy: -(b.minY + b.maxY) / 2 };
 }
 
 /** Shelf packing into a given inner width. Returns placements and used height, or null if something doesn't fit. */
-function shelfPack(items: Item[], innerW: number, pad: number) {
+function shelfPack(items: Item[], innerW: number, pad: number, notchR: number) {
   const boxes = items.map((it) => {
     const r0 = ((it.rotation % 360) + 360) % 360;
-    let b = makeBox(it, r0, pad);
+    let b = makeBox(it, r0, pad, notchR);
     if (b.w > innerW) {
-      const alt = makeBox(it, r0 + 90, pad);
+      const alt = makeBox(it, r0 + 90, pad, notchR);
       if (alt.w <= innerW) b = alt;
     }
     return b;
@@ -155,37 +167,60 @@ function shelfPack(items: Item[], innerW: number, pad: number) {
   return { shelves, usedH, usedW };
 }
 
+export interface ArrangeResult {
+  ok: boolean;
+  /** True when the items only fit in a bin larger than settings.maxUnits. */
+  exceedsBed: boolean;
+}
+
+/** Hard upper limit on bin size, to keep the search bounded. */
+const ABSOLUTE_MAX_UNITS = 20;
+
 /**
  * Arranges the items. With settings.autoSize the bin size is chosen to use the fewest grid
- * cells; otherwise items are packed into the configured size. Mutates the items' x, y,
- * rotation and the settings' unitsX/unitsY. Returns false if they don't fit.
+ * cells within settings.maxUnits; if nothing fits within that, the bin grows beyond it and
+ * exceedsBed is set. Without autoSize, items are packed into the configured size. Mutates the
+ * items' x, y, rotation and the settings' unitsX/unitsY.
  */
-export function autoArrange(items: Item[], settings: BinSettings): boolean {
-  if (!items.length) return true;
+export function autoArrange(items: Item[], settings: BinSettings): ArrangeResult {
+  if (!items.length) return { ok: true, exceedsBed: false };
   const pad = 2 * settings.clearance + settings.spacing;
   const margin = 2 * GF.edgeMargin - settings.spacing; // spacing on the outside is already included in pad
+  const notchR = settings.fingerRadius;
   type Result = { n: number; m: number; pack: NonNullable<ReturnType<typeof shelfPack>> };
-  let best: Result | null = null;
-  const tryN = settings.autoSize
-    ? Array.from({ length: Math.max(1, settings.maxUnits) }, (_, i) => i + 1)
-    : [settings.unitsX];
-  for (const n of tryN) {
-    const innerW = binOuterSize(n) - margin;
-    const pack = shelfPack(items, innerW, pad);
-    if (!pack) continue;
-    const m = settings.autoSize
-      ? Math.max(1, Math.ceil((pack.usedH + margin + GF.clearance) / GF.pitch - 1e-9))
-      : settings.unitsY;
-    if (settings.autoSize && m > settings.maxUnits) continue;
-    if (!settings.autoSize && pack.usedH > binOuterSize(m) - margin + 1e-6) continue;
-    if (
-      !best ||
-      n * m < best.n * best.m ||
-      (n * m === best.n * best.m && Math.abs(n - m) < Math.abs(best.n - best.m))
-    )
-      best = { n, m, pack };
+
+  // Within the bed limit, use the fewest cells. Past it, keep the longest side as short as
+  // possible (closest to printable), then the fewest cells.
+  const better = (a: Result, b: Result, pastBed: boolean) => {
+    if (pastBed && Math.max(a.n, a.m) !== Math.max(b.n, b.m)) return Math.max(a.n, a.m) < Math.max(b.n, b.m);
+    if (a.n * a.m !== b.n * b.m) return a.n * a.m < b.n * b.m;
+    return Math.abs(a.n - a.m) < Math.abs(b.n - b.m);
+  };
+  const search = (limit: number, pastBed = false): Result | null => {
+    let best: Result | null = null;
+    const tryN = settings.autoSize ? Array.from({ length: limit }, (_, i) => i + 1) : [settings.unitsX];
+    for (const n of tryN) {
+      const innerW = binOuterSize(n) - margin;
+      const pack = shelfPack(items, innerW, pad, notchR);
+      if (!pack) continue;
+      const m = settings.autoSize
+        ? Math.max(1, Math.ceil((pack.usedH + margin + GF.clearance) / GF.pitch - 1e-9))
+        : settings.unitsY;
+      if (settings.autoSize && m > limit) continue;
+      if (!settings.autoSize && pack.usedH > binOuterSize(m) - margin + 1e-6) continue;
+      const cand = { n, m, pack };
+      if (!best || better(cand, best, pastBed)) best = cand;
+    }
+    return best;
+  };
+
+  let exceedsBed = false;
+  let best = search(Math.max(1, settings.maxUnits));
+  if (!best && settings.autoSize) {
+    best = search(ABSOLUTE_MAX_UNITS, true);
+    exceedsBed = !!best;
   }
-  if (!best) return false;
+  if (!best) return { ok: false, exceedsBed: false };
   settings.unitsX = best.n;
   settings.unitsY = best.m;
   const { shelves, usedH } = best.pack;
@@ -199,7 +234,33 @@ export function autoArrange(items: Item[], settings: BinSettings): boolean {
       b.item.y = top + s.y + s.h / 2 + b.oy;
     }
   }
-  return true;
+  return { ok: true, exceedsBed };
+}
+
+/**
+ * Keeps the user's arrangement but resizes the bin to the smallest grid size that contains it,
+ * re-centring the group of items. Used in auto-size mode after items are moved or rotated.
+ */
+export function fitBinToItems(items: Item[], settings: BinSettings): void {
+  if (!items.length) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const it of items) {
+    const b = footprintBBox(it, it.rotation, settings.fingerRadius);
+    minX = Math.min(minX, it.x + b.minX);
+    maxX = Math.max(maxX, it.x + b.maxX);
+    minY = Math.min(minY, it.y + b.minY);
+    maxY = Math.max(maxY, it.y + b.maxY);
+  }
+  // Note: rotatedBBox is about the item origin, which footprintBBox already includes.
+  const need = (span: number) =>
+    Math.max(1, Math.ceil((span + 2 * settings.clearance + 2 * GF.edgeMargin + GF.clearance) / GF.pitch - 1e-9));
+  settings.unitsX = need(maxX - minX);
+  settings.unitsY = need(maxY - minY);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  for (const it of items) {
+    it.x -= cx;
+    it.y -= cy;
+  }
 }
 
 /** Centre of the finger notch for an item, in bin top-view coordinates, or null. */
