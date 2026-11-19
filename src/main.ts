@@ -418,6 +418,12 @@ function readSettings() {
   settings.fingerRadius = Math.max(4, num('finger') || 10);
   settings.magnets = $<HTMLInputElement>('magnets').checked;
   settings.lip = $<HTMLInputElement>('lip').checked;
+  for (const key of ['rim', 'step'] as const) {
+    const type = $<HTMLSelectElement>(`${key}-type`).value as BinSettings['rimEdge']['type'];
+    const size = Math.max(0, +$<HTMLInputElement>(`${key}-size`).value || 0);
+    settings[key === 'rim' ? 'rimEdge' : 'stepEdge'] = { type, size };
+    $<HTMLInputElement>(`${key}-size`).disabled = type === 'none';
+  }
   $<HTMLInputElement>('units-x').disabled = settings.autoSize;
   $<HTMLInputElement>('units-y').disabled = settings.autoSize;
 }
@@ -425,10 +431,10 @@ function writeUnits() {
   $<HTMLInputElement>('units-x').value = String(settings.unitsX);
   $<HTMLInputElement>('units-y').value = String(settings.unitsY);
 }
-for (const id of ['units-x', 'units-y', 'units-z', 'clearance', 'spacing', 'finger', 'magnets', 'lip', 'max-units']) {
+for (const id of ['units-x', 'units-y', 'units-z', 'clearance', 'spacing', 'finger', 'magnets', 'lip', 'max-units', 'rim-type', 'rim-size', 'step-type', 'step-size']) {
   $(id).addEventListener('change', () => {
     readSettings();
-    if (settings.autoSize && ['clearance', 'spacing', 'max-units', 'finger'].includes(id)) arrange();
+    if (settings.autoSize && ['clearance', 'spacing', 'max-units', 'finger', 'rim-type', 'rim-size'].includes(id)) arrange();
     else {
       if (!settings.autoSize) layoutWarnings = [];
       changed();
@@ -478,6 +484,7 @@ function renderItems() {
   const body = $('bin-items');
   body.innerHTML = '';
   $('empty-bin').hidden = items.length > 0;
+  $('item-count').textContent = items.length ? `(${items.length})` : '';
   items.forEach((it, idx) => {
     const card = document.createElement('div');
     card.className = 'item-card';

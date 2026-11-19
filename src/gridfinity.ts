@@ -92,40 +92,78 @@ export function buildBin(wasm: ManifoldToplevel, items: Item[], settings: BinSet
   const pocketShapes: CrossSection[] = [];
   const cuts: Manifold[] = [];
   let sumArea = 0;
+  const rim = settings.rimEdge.type === 'none' ? 0 : settings.rimEdge.size;
   for (const item of items) {
     // Top view uses y down; the model uses y up, so flip.
     const polys = placedLoops(item).map((l) => l.map((p) => [p.x, -p.y] as [number, number]));
     const pocket = s.t(s.t(s.t(new CrossSection(polys, 'NonZero')).offset(settings.clearance, 'Round', 2, SEGS)).simplify(0.02));
+
+    // Depth layers, later ones winning where they overlap: finger notches (only outside the
+    // pocket, so the pocket stays at full depth), the pocket, then each zone clipped to it.
+    const layers: { region: CrossSection; depth: number }[] = [];
     let shape = pocket;
+    const notchDepth = Math.min(item.depth, Math.max(8, item.depth * 0.8));
     for (const nc of placedNotches(item)) {
       const circle = s.t(s.t(CrossSection.circle(settings.fingerRadius, SEGS)).translate([nc.x, -nc.y]));
-      // Notches are cut separately so they can stop a little shallower than very deep pockets.
-      const notchDepth = Math.min(item.depth, Math.max(8, item.depth * 0.8));
-      cuts.push(s.t(s.t(circle.extrude(cutTop - (top - notchDepth))).translate([0, 0, top - notchDepth])));
+      layers.push({ region: s.t(circle.subtract(pocket)), depth: notchDepth });
       shape = s.t(shape.add(circle));
     }
     sumArea += shape.area();
     pocketShapes.push(shape);
-
-    // Depth layers: the pocket at the item's depth, then each zone (clipped to the pocket) at its
-    // own depth. Later layers win, so each layer only keeps the part no later layer covers.
-    const layers: { region: CrossSection; depth: number }[] = [{ region: pocket, depth: item.depth }];
+    layers.push({ region: pocket, depth: item.depth });
     item.zones.forEach((z, zi) => {
       const poly = placedZone(item, z).map((p) => [p.x, -p.y] as [number, number]);
       const region = s.t(pocket.intersect(s.t(new CrossSection([poly], 'NonZero'))));
       if (region.area() < 0.5) warnings.push(`Depth zone ${zi + 1} on "${item.name}" doesn't overlap its pocket.`);
       else layers.push({ region, depth: z.depth });
     });
+    // Make the layers disjoint: each keeps only what no later layer covers.
+    const finals: { region: CrossSection; depth: number }[] = [];
     for (let li = 0; li < layers.length; li++) {
       let region = layers[li].region;
       if (li + 1 < layers.length) region = s.t(region.subtract(s.t(CrossSection.union(layers.slice(li + 1).map((l) => l.region)))));
-      if (region.area() < 0.01) continue;
-      const d = layers[li].depth;
-      cuts.push(s.t(s.t(region.extrude(cutTop - (top - d))).translate([0, 0, top - d])));
+      if (region.area() > 0.01) finals.push({ region, depth: layers[li].depth });
     }
-    // Bounds check against the usable area.
+    cuts.push(...cutLevels(finals));
+
+    // Bounds check against the usable area (including the rim edge, which widens the top).
     const usable = roundedRect(W - 2 * GF.edgeMargin, D - 2 * GF.edgeMargin, Math.max(0.5, R - GF.edgeMargin));
-    if (s.t(shape.subtract(usable)).area() > 0.5) warnings.push(`"${item.name}" sticks out past the bin's inner edge.`);
+    const outer = rim > 0 ? s.t(shape.offset(rim, 'Round', 2, SEGS)) : shape;
+    if (s.t(outer.subtract(usable)).area() > 0.5) warnings.push(`"${item.name}" sticks out past the bin's inner edge.`);
+  }
+
+  /**
+   * Turns disjoint depth regions into cutting solids. The pocket is treated as nested levels:
+   * between depth d[k] and d[k+1] the cut covers every region at least d[k+1] deep (R[k]). The
+   * top edge of each level (at d[k]) then gets its chamfer or fillet, built as thin slices of R[k]
+   * grown outward by the profile, kept within the level above. Level 0's edge is the pocket rim;
+   * the others are steps between depths.
+   */
+  function cutLevels(finals: { region: CrossSection; depth: number }[]): Manifold[] {
+    const out: Manifold[] = [];
+    const depths = [...new Set(finals.map((f) => f.depth))].sort((a, b) => a - b);
+    const levels = [0, ...depths];
+    const R: CrossSection[] = [];
+    for (let k = 0; k < depths.length; k++) {
+      R.push(s.t(CrossSection.union(finals.filter((f) => f.depth >= depths[k]).map((f) => f.region))));
+    }
+    for (let k = 0; k < depths.length; k++) {
+      const dTop = levels[k], dBottom = levels[k + 1];
+      out.push(s.t(s.t(R[k].extrude(cutTop - (top - dBottom))).translate([0, 0, top - dBottom])));
+      const edge = k === 0 ? settings.rimEdge : settings.stepEdge;
+      if (edge.type === 'none' || edge.size <= 0) continue;
+      const e = Math.min(edge.size, dBottom - dTop); // never deeper than the step itself
+      if (e < 0.05) continue;
+      const n = Math.max(3, Math.min(24, Math.ceil(e / 0.15)));
+      const grow = (t: number) => (edge.type === 'chamfer' ? e - t : e - Math.sqrt(Math.max(0, e * e - (e - t) ** 2)));
+      for (let j = 0; j < n; j++) {
+        const tMid = ((j + 0.5) / n) * e, tLow = ((j + 1) / n) * e;
+        let slab = s.t(s.t(R[k].offset(grow(tMid), 'Round', 2, SEGS)).simplify(0.02));
+        if (k > 0) slab = s.t(slab.intersect(R[k - 1]));
+        out.push(s.t(s.t(slab.extrude(cutTop - (top - dTop - tLow))).translate([0, 0, top - dTop - tLow])));
+      }
+    }
+    return out;
   }
   if (pocketShapes.length > 1) {
     const union = s.t(CrossSection.union(pocketShapes));

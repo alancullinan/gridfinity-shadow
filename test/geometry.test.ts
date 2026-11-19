@@ -83,7 +83,8 @@ describe('layout', () => {
 });
 
 describe('depth zones', () => {
-  const fixed = { ...defaultSettings(), autoSize: false, unitsX: 2, unitsY: 1, unitsZ: 5, clearance: 0 };
+  const none = { type: 'none' as const, size: 0 };
+  const fixed = { ...defaultSettings(), autoSize: false, unitsX: 2, unitsY: 1, unitsZ: 5, clearance: 0, rimEdge: none, stepEdge: none };
   const volumeOf = (it: Item) => {
     const r = buildBin(wasm, [it], fixed);
     const v = r.manifold.volume();
@@ -123,6 +124,52 @@ describe('depth zones', () => {
     expect(r.warnings.join()).toMatch(/doesn't overlap/);
     const s = defaultSettings();
     expect(requiredHeightUnits([{ ...base(), zones: [zone({ depth: 30 })] }], s)).toBe(6);
+  });
+});
+
+describe('edge chamfers and fillets', () => {
+  const none = { type: 'none' as const, size: 0 };
+  const cfg = (rim: typeof none | { type: 'chamfer' | 'fillet'; size: number }, step: typeof none | { type: 'chamfer' | 'fillet'; size: number } = none) => ({
+    ...defaultSettings(), autoSize: false, unitsX: 2, unitsY: 1, unitsZ: 5, clearance: 0, rimEdge: rim, stepEdge: step,
+  });
+  const vol = (it: Item, s: ReturnType<typeof cfg>) => {
+    const r = buildBin(wasm, [it], s);
+    const ok = (r.manifold as unknown as { status(): { value: number } }).status().value === 0;
+    const v = r.manifold.volume();
+    r.manifold.delete();
+    expect(ok).toBe(true);
+    return v;
+  };
+  const bar = () => item(1, 60, 20, 10); // perimeter 160 mm
+
+  it('chamfers the pocket rim (removes ~ perimeter × c²/2)', () => {
+    const extra = vol(bar(), cfg(none)) - vol(bar(), cfg({ type: 'chamfer', size: 1 }));
+    expect(extra).toBeGreaterThan(160 * 0.5 * 0.9);
+    expect(extra).toBeLessThan(160 * 0.5 * 1.15);
+  });
+  it('fillets the rim (removes ~ perimeter × c²(1 − π/4))', () => {
+    const extra = vol(bar(), cfg(none)) - vol(bar(), cfg({ type: 'fillet', size: 1 }));
+    expect(extra).toBeGreaterThan(160 * 0.2146 * 0.85);
+    expect(extra).toBeLessThan(160 * 0.2146 * 1.2);
+  });
+  it('rounds only the inside edge of a depth step, never past the step height', () => {
+    // Deeper zone over the left 20 mm: its only edge inside the pocket is the 20 mm line at x = -10.
+    const it = { ...bar(), zones: [{ kind: 'rect' as const, x: -20, y: 0, w: 20, h: 30, rotation: 0, depth: 15 }] };
+    const extra = vol(it, cfg(none)) - vol(it, cfg(none, { type: 'chamfer', size: 1 }));
+    expect(extra).toBeGreaterThan(20 * 0.5 * 0.8);
+    expect(extra).toBeLessThan(20 * 0.5 * 1.3);
+    // A 0.5 mm step with a 2 mm chamfer is limited to the step: ~ 20 × 0.5²/2 = 2.5 mm³.
+    const low = { ...bar(), zones: [{ ...it.zones[0], depth: 10.5 }] };
+    const small = vol(low, cfg(none)) - vol(low, cfg(none, { type: 'chamfer', size: 2 }));
+    expect(small).toBeLessThan(4);
+    expect(small).toBeGreaterThan(1);
+  });
+  it('rounds the top of a raised platform and stays valid with notches and zones together', () => {
+    const plat = { ...bar(), zones: [{ kind: 'circle' as const, x: 0, y: 0, w: 12, h: 12, rotation: 0, depth: 4 }] };
+    const extra = vol(plat, cfg(none)) - vol(plat, cfg(none, { type: 'fillet', size: 1 }));
+    expect(extra).toBeGreaterThan(Math.PI * 12 * 0.2146 * 0.7); // circumference × fillet section
+    const busy = { ...plat, notches: [{ x: 0, y: -10 }, { x: 30, y: 0 }], zones: [...plat.zones, { kind: 'rect' as const, x: -22, y: 0, w: 14, h: 30, rotation: 20, depth: 16 }] };
+    vol(busy, cfg({ type: 'fillet', size: 1.5 }, { type: 'chamfer', size: 1 }));
   });
 });
 

@@ -52,6 +52,21 @@ export interface BinSettings {
   floor: number;
   /** Largest bin side (in grid units) the printer bed can take. */
   maxUnits: number;
+  /** Edge where pockets meet the top of the bin. */
+  rimEdge: EdgeStyle;
+  /** Edges where the depth changes inside a pocket (depth zones, notches). */
+  stepEdge: EdgeStyle;
+}
+
+export interface EdgeStyle {
+  type: 'none' | 'chamfer' | 'fillet';
+  /** Size in mm (horizontal and vertical). */
+  size: number;
+}
+
+/** Extra width the rim edge adds around each pocket at the top. */
+export function rimSize(settings: BinSettings): number {
+  return settings.rimEdge.type === 'none' ? 0 : settings.rimEdge.size;
 }
 
 export const GF = {
@@ -78,6 +93,8 @@ export function defaultSettings(): BinSettings {
     fingerRadius: 10,
     floor: 1.2,
     maxUnits: 5,
+    rimEdge: { type: 'fillet', size: 1 },
+    stepEdge: { type: 'fillet', size: 1 },
   };
 }
 
@@ -206,7 +223,7 @@ const ABSOLUTE_MAX_UNITS = 20;
  */
 export function autoArrange(items: Item[], settings: BinSettings): ArrangeResult {
   if (!items.length) return { ok: true, exceedsBed: false };
-  const pad = 2 * settings.clearance + settings.spacing;
+  const pad = 2 * (settings.clearance + rimSize(settings)) + settings.spacing;
   const margin = 2 * GF.edgeMargin - settings.spacing; // spacing on the outside is already included in pad
   const notchR = settings.fingerRadius;
   type Result = { n: number; m: number; pack: NonNullable<ReturnType<typeof shelfPack>> };
@@ -275,7 +292,7 @@ export function fitBinToItems(items: Item[], settings: BinSettings): void {
   }
   // Note: rotatedBBox is about the item origin, which footprintBBox already includes.
   const need = (span: number) =>
-    Math.max(1, Math.ceil((span + 2 * settings.clearance + 2 * GF.edgeMargin + GF.clearance) / GF.pitch - 1e-9));
+    Math.max(1, Math.ceil((span + 2 * (settings.clearance + rimSize(settings)) + 2 * GF.edgeMargin + GF.clearance) / GF.pitch - 1e-9));
   settings.unitsX = need(maxX - minX);
   settings.unitsY = need(maxY - minY);
   const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;

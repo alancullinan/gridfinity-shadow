@@ -85,39 +85,51 @@
     </section>
 
     <section class="card" id="step-bin">
-      <h2><span class="num">3</span> Arrange the bin</h2>
-      <div class="two-col">
-        <div>
-          <canvas id="layout-canvas"></canvas>
-          <p class="hint">Drag items to move them (on a computer, Shift-drag rotates). Drag a notch's white dot to slide it around the item. <b>Depth zones</b> (dark = deeper, light = shallower) change the pocket depth under them: drag to move, drag the square handle to resize.</p>
-        </div>
-        <div>
-          <div class="settings">
-            <label><input type="checkbox" id="auto-size" checked /> Auto bin size</label>
-            <label>Max size (bed) <input type="number" id="max-units" min="1" max="10" value="5" /> u</label>
-            <label>Width <input type="number" id="units-x" min="1" max="10" value="2" /> u</label>
-            <label>Depth <input type="number" id="units-y" min="1" max="10" value="2" /> u</label>
-            <label>Height <input type="number" id="units-z" min="0" max="20" value="0" /> u <small>(0 = auto)</small></label>
-            <label>Clearance <input type="number" id="clearance" min="0" max="5" step="0.1" value="1" /> mm</label>
-            <label>Spacing <input type="number" id="spacing" min="0.8" max="10" step="0.1" value="2" /> mm</label>
-            <label>Finger notch radius <input type="number" id="finger" min="4" max="25" step="0.5" value="10" /> mm</label>
-            <label><input type="checkbox" id="magnets" /> Magnet holes (6 × 2 mm)</label>
-            <label><input type="checkbox" id="lip" checked /> Stacking lip</label>
+      <h2><span class="num">3</span> Design the bin</h2>
+      <div class="ws">
+        <div class="ws-main">
+          <div class="panel">
+            <div class="panel-head"><h3>Layout</h3><button id="arrange" title="Re-pack all items">Auto-arrange</button></div>
+            <canvas id="layout-canvas"></canvas>
+            <p class="hint">Drag items to move them; Shift-drag rotates. Drag a notch's white dot along the edge. <b>Depth zones</b> (dark = deeper, light = shallower): drag to move, square handle to resize.</p>
           </div>
-          <div class="row"><button id="arrange">Auto-arrange</button><button id="add-test">Add test shape</button></div>
-          <div id="bin-items" class="item-list"></div>
-          <p id="empty-bin" class="hint">No items yet. Add some from a photo, or add a test shape.</p>
+          <div class="panel" id="step-model">
+            <div class="panel-head"><h3>3D preview</h3><button id="download-stl" class="primary" disabled>Download STL</button></div>
+            <div id="viewer"></div>
+            <p id="model-info" class="status"></p>
+            <ul id="warnings"></ul>
+          </div>
         </div>
-      </div>
-    </section>
-
-    <section class="card" id="step-model">
-      <h2><span class="num">4</span> Preview &amp; download</h2>
-      <div id="viewer"></div>
-      <ul id="warnings"></ul>
-      <div class="row">
-        <span id="model-info" class="status"></span>
-        <button id="download-stl" class="primary" disabled>Download STL</button>
+        <aside class="ws-side">
+          <details open>
+            <summary>Bin</summary>
+            <div class="form">
+              <label class="check"><input type="checkbox" id="auto-size" checked /> Auto size to fit items</label>
+              <label class="field"><span>Max size (printer bed)</span><span><input type="number" id="max-units" min="1" max="10" value="5" /> u</span></label>
+              <label class="field"><span>Width</span><span><input type="number" id="units-x" min="1" max="10" value="2" /> u</span></label>
+              <label class="field"><span>Depth</span><span><input type="number" id="units-y" min="1" max="10" value="2" /> u</span></label>
+              <label class="field"><span>Height <small>(0 = auto)</small></span><span><input type="number" id="units-z" min="0" max="20" value="0" /> u</span></label>
+              <label class="check"><input type="checkbox" id="magnets" /> Magnet holes (6 × 2 mm)</label>
+              <label class="check"><input type="checkbox" id="lip" checked /> Stacking lip</label>
+            </div>
+          </details>
+          <details open>
+            <summary>Pockets &amp; edges</summary>
+            <div class="form">
+              <label class="field"><span>Clearance around items</span><span><input type="number" id="clearance" min="0" max="5" step="0.1" value="1" /> mm</span></label>
+              <label class="field"><span>Wall between pockets</span><span><input type="number" id="spacing" min="0.8" max="10" step="0.1" value="2" /> mm</span></label>
+              <label class="field"><span>Finger notch radius</span><span><input type="number" id="finger" min="4" max="25" step="0.5" value="10" /> mm</span></label>
+              <label class="field"><span>Pocket rim edge</span><span><select id="rim-type"><option value="none">None</option><option value="chamfer">Chamfer</option><option value="fillet" selected>Fillet</option></select> <input type="number" id="rim-size" min="0.2" max="5" step="0.1" value="1" /> mm</span></label>
+              <label class="field"><span>Depth step edges</span><span><select id="step-type"><option value="none">None</option><option value="chamfer">Chamfer</option><option value="fillet" selected>Fillet</option></select> <input type="number" id="step-size" min="0.2" max="5" step="0.1" value="1" /> mm</span></label>
+            </div>
+          </details>
+          <details open>
+            <summary>Items <span id="item-count" class="hint"></span></summary>
+            <div class="row"><button id="add-test">Add test shape</button></div>
+            <div id="bin-items" class="item-list"></div>
+            <p id="empty-bin" class="hint">No items yet. Add some from a photo, or add a test shape.</p>
+          </details>
+        </aside>
       </div>
     </section>
   </main>
