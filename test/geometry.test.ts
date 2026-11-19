@@ -50,16 +50,30 @@ describe('layout', () => {
     expect(b.warnings).toEqual([]);
     b.manifold.delete();
   });
-  it('resizes and recentres to fit a manual arrangement', () => {
-    const s = defaultSettings();
-    const items = [item(1, 30, 20), item(2, 30, 20)];
-    items[1].x = 80; // dragged to the right: span 110 mm + margins = 118.5 mm -> 3u
+  it('keeps manually placed items where they are when they fit', () => {
+    const s = { ...defaultSettings(), unitsX: 3, unitsY: 2 };
+    const items = [item(1, 30, 20)];
+    items[0].x = 30; // towards the right of a 3 x 2 bin, still inside
+    items[0].y = -15;
     fitBinToItems(items, s);
-    expect([s.unitsX, s.unitsY]).toEqual([3, 1]);
-    expect(items[0].x + items[1].x).toBeCloseTo(0);
+    expect([s.unitsX, s.unitsY]).toEqual([3, 2]); // no shrinking
+    expect([items[0].x, items[0].y]).toEqual([30, -15]); // no snapping back to the middle
     const b = buildBin(wasm, items, s);
     expect(b.warnings).toEqual([]);
     b.manifold.delete();
+  });
+  it('grows the bin and nudges items only as much as needed when something sticks out', () => {
+    const s = { ...defaultSettings(), unitsX: 2, unitsY: 1 };
+    const items = [item(1, 30, 20), item(2, 30, 20)];
+    items[0].x = -20;
+    items[1].x = 60; // past the right edge of a 2-unit bin
+    fitBinToItems(items, s);
+    expect(s.unitsX).toBe(3);
+    const b = buildBin(wasm, items, s);
+    expect(b.warnings).toEqual([]);
+    b.manifold.delete();
+    // The gap between the two items is kept exactly.
+    expect(items[1].x - items[0].x).toBeCloseTo(80);
   });
   it('places notches on the outline and rotates them with the item', () => {
     const it1 = { ...item(1, 60, 20), x: 10, y: 5, rotation: 90 };

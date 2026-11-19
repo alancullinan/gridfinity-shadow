@@ -280,8 +280,10 @@ export function autoArrange(items: Item[], settings: BinSettings): ArrangeResult
 }
 
 /**
- * Keeps the user's arrangement but resizes the bin to the smallest grid size that contains it,
- * re-centring the group of items. Used in auto-size mode after items are moved or rotated.
+ * After a manual move/rotate in auto-size mode: leaves items exactly where the user put them
+ * if they fit in the current bin. Only if something sticks out does the bin grow (by the fewest
+ * grid units), and items then shift just enough to fit. The bin never shrinks here, so items
+ * never jump; Auto-arrange packs tightly.
  */
 export function fitBinToItems(items: Item[], settings: BinSettings): void {
   if (!items.length) return;
@@ -293,16 +295,25 @@ export function fitBinToItems(items: Item[], settings: BinSettings): void {
     minY = Math.min(minY, it.y + b.minY);
     maxY = Math.max(maxY, it.y + b.maxY);
   }
-  // Note: rotatedBBox is about the item origin, which footprintBBox already includes.
-  const need = (span: number) =>
-    Math.max(1, Math.ceil((span + 2 * (settings.clearance + rimSize(settings)) + 2 * GF.edgeMargin + GF.clearance) / GF.pitch - 1e-9));
-  settings.unitsX = need(maxX - minX);
-  settings.unitsY = need(maxY - minY);
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-  for (const it of items) {
-    it.x -= cx;
-    it.y -= cy;
-  }
+  const inset = settings.clearance + rimSize(settings);
+  /** Half the width available to item footprints in a bin of n units. */
+  const half = (n: number) => (binOuterSize(n) - 2 * GF.edgeMargin) / 2 - inset;
+  const fit = (n: number, lo: number, hi: number) => {
+    while (hi - lo > 2 * half(n) + 1e-6 && n < 20) n++;
+    const h = half(n);
+    // Smallest shift that brings [lo, hi] inside [-h, h] (zero if it already is).
+    const shift = hi > h ? h - hi : lo < -h ? -h - lo : 0;
+    return { n, shift: Math.abs(shift) < 1e-6 ? 0 : shift };
+  };
+  const fx = fit(settings.unitsX, minX, maxX);
+  const fy = fit(settings.unitsY, minY, maxY);
+  settings.unitsX = fx.n;
+  settings.unitsY = fy.n;
+  if (fx.shift || fy.shift)
+    for (const it of items) {
+      it.x += fx.shift;
+      it.y += fy.shift;
+    }
 }
 
 /** Finger notch centres in bin top-view coordinates. */
