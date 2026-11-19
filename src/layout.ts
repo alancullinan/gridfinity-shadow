@@ -131,16 +131,18 @@ function rotatedBBox(loops: Point[][], deg: number) {
 
 /** Rotation (deg) giving the smallest bounding box, with the long side horizontal. */
 export function bestOrientation(loops: Point[][]): number {
-  let best = 0, bestArea = Infinity;
+  const areas: number[] = [];
   for (let d = 0; d < 180; d += 1) {
     const b = rotatedBBox(loops, d);
-    if (b.w * b.h < bestArea - 1e-6) {
-      bestArea = b.w * b.h;
-      best = d;
-    }
+    areas.push(b.w * b.h);
   }
+  const min = Math.min(...areas);
+  // Prefer the angle closest to 0° among near-ties (round or square items keep their angle).
+  let best = -1;
+  for (let d = 0; d < 180; d++)
+    if (areas[d] <= min * 1.01 && (best < 0 || Math.min(d, 180 - d) < Math.min(best, 180 - best))) best = d;
   const b = rotatedBBox(loops, best);
-  return b.h > b.w ? best + 90 : best;
+  return b.h > b.w ? (best + 90) % 360 : best;
 }
 
 /** Re-centres loops on their bounding-box centre. Returns the shift that was applied. */
@@ -161,7 +163,7 @@ interface Box {
 }
 
 /** Bounding box of an item at a rotation, grown on the notch side so the finger notch fits too. */
-function footprintBBox(item: Item, rot: number, notchR: number) {
+export function footprintBBox(item: Item, rot: number, notchR: number) {
   const b = rotatedBBox(item.loops, rot);
   for (const n of item.notches) {
     const p = transformPoint(n, { x: 0, y: 0, rotation: rot });
@@ -314,6 +316,24 @@ export function fitBinToItems(items: Item[], settings: BinSettings): void {
       it.x += fx.shift;
       it.y += fy.shift;
     }
+}
+
+/**
+ * Keeps an item inside the bin's usable area (the bin wall acts as a wall). Items too big to fit
+ * are left alone. Returns true if the item was moved.
+ */
+export function clampToBin(item: Item, settings: BinSettings): boolean {
+  const b = footprintBBox(item, item.rotation, settings.fingerRadius);
+  const inset = settings.clearance + rimSize(settings);
+  const hx = (binOuterSize(settings.unitsX) - 2 * GF.edgeMargin) / 2 - inset;
+  const hy = (binOuterSize(settings.unitsY) - 2 * GF.edgeMargin) / 2 - inset;
+  const clamp = (pos: number, lo: number, hi: number, h: number) =>
+    hi - lo > 2 * h ? pos : Math.min(h - hi, Math.max(-h - lo, pos));
+  const x = clamp(item.x, b.minX, b.maxX, hx), y = clamp(item.y, b.minY, b.maxY, hy);
+  const moved = Math.abs(x - item.x) > 1e-9 || Math.abs(y - item.y) > 1e-9;
+  item.x = x;
+  item.y = y;
+  return moved;
 }
 
 /** Finger notch centres in bin top-view coordinates. */

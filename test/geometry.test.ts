@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import Module, { ManifoldToplevel } from 'manifold-3d';
 import { buildBin, toStl } from '../src/gridfinity';
-import { DepthZone, Item, autoArrange, defaultSettings, fitBinToItems, nearestOnLoops, placedNotches, requiredHeightUnits, suggestNotch } from '../src/layout';
+import { DepthZone, Item, autoArrange, bestOrientation, clampToBin, defaultSettings, fitBinToItems, nearestOnLoops, placedNotches, requiredHeightUnits, suggestNotch } from '../src/layout';
 
 let wasm: ManifoldToplevel;
 beforeAll(async () => {
@@ -74,6 +74,30 @@ describe('layout', () => {
     b.manifold.delete();
     // The gap between the two items is kept exactly.
     expect(items[1].x - items[0].x).toBeCloseTo(80);
+  });
+  it('orients items to their tightest box, keeping 0° for round or square ones', () => {
+    const disc = [Array.from({ length: 64 }, (_, i) => ({ x: 15 * Math.cos((i / 64) * 2 * Math.PI), y: 15 * Math.sin((i / 64) * 2 * Math.PI) }))];
+    expect(bestOrientation(disc)).toBe(0);
+    expect(bestOrientation(rect(20, 20))).toBe(0);
+    expect(bestOrientation(rect(60, 20))).toBe(0);
+    expect(bestOrientation(rect(20, 60))).toBe(90);
+    // A long bar drawn at 30°: rotating by -30 (= 150) makes it horizontal.
+    const a = (30 * Math.PI) / 180;
+    const bar = [rect(80, 10)[0].map((p) => ({ x: p.x * Math.cos(a) - p.y * Math.sin(a), y: p.x * Math.sin(a) + p.y * Math.cos(a) }))];
+    expect(bestOrientation(bar)).toBe(150);
+  });
+  it('clamps a dragged item to the bin wall, leaving items that fit or are too big alone', () => {
+    const s = { ...defaultSettings(), unitsX: 2, unitsY: 1, rimEdge: { type: 'none' as const, size: 0 } };
+    const a = item(1, 30, 20);
+    a.x = 100;
+    expect(clampToBin(a, s)).toBe(true);
+    // usable half-width = (83.5 - 6)/2 - clearance 1 = 37.75 -> centre at 37.75 - 15
+    expect(a.x).toBeCloseTo(22.75);
+    expect(clampToBin(a, s)).toBe(false);
+    const big = item(2, 120, 20);
+    big.x = 5;
+    expect(clampToBin(big, s)).toBe(false);
+    expect(big.x).toBe(5);
   });
   it('places notches on the outline and rotates them with the item', () => {
     const it1 = { ...item(1, 60, 20), x: 10, y: 5, rotation: 90 };

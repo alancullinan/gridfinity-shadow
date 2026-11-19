@@ -4,165 +4,269 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gridfinity Tracer</title>
-  <meta name="description" content="Photograph items on a printed grid and get a Gridfinity bin with custom cut-outs." />
+  <meta name="description" content="Photograph your tools on a printed grid and get a Gridfinity bin with a perfectly shaped pocket for each one." />
+  <meta name="theme-color" content="#2563eb" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='8' fill='%232563eb'/%3E%3Crect x='6.5' y='6.5' width='8.5' height='8.5' rx='2' fill='%23fff'/%3E%3Crect x='17' y='6.5' width='8.5' height='8.5' rx='2' fill='%23fff' fill-opacity='.55'/%3E%3Crect x='6.5' y='17' width='8.5' height='8.5' rx='2' fill='%23fff' fill-opacity='.55'/%3E%3Crect x='17' y='17' width='8.5' height='8.5' rx='2' fill='%23fff'/%3E%3Ccircle cx='21.25' cy='21.25' r='2.1' fill='%232563eb'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="./src/style.css" />
 </head>
 <body>
-  <header>
-    <h1>Gridfinity Tracer</h1>
-    <p>Photograph your items on the printed grid and get a Gridfinity bin with a pocket for each one.</p>
-  </header>
-  <main>
-    <section class="card" id="step-template">
-      <h2><span class="num">1</span> Print the template</h2>
-      <p>Print the template at <b>100% / actual size</b>, then check the 100 mm bar with a ruler. Lay your items flat inside the grid, clear of the four black squares.</p>
-      <div class="row">
-        <label>Paper
-          <select id="paper">
-            <option value="a4">A4</option>
-            <option value="letter">US Letter</option>
-          </select>
-        </label>
-        <button id="print-template" class="primary">Print template</button>
-        <button id="download-template">Download SVG</button>
+<div class="app">
+  <!-- ======================================================================= App bar -->
+  <header class="appbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="1" y="1" width="30" height="30" rx="8" fill="var(--accent)" />
+        <rect x="6.5" y="6.5" width="8.5" height="8.5" rx="2" fill="#fff" fill-opacity=".95" />
+        <rect x="17" y="6.5" width="8.5" height="8.5" rx="2" fill="#fff" fill-opacity=".55" />
+        <rect x="6.5" y="17" width="8.5" height="8.5" rx="2" fill="#fff" fill-opacity=".55" />
+        <rect x="17" y="17" width="8.5" height="8.5" rx="2" fill="#fff" fill-opacity=".95" />
+        <circle cx="21.25" cy="21.25" r="2.1" fill="var(--accent)" />
+      </svg>
+      <span class="brand-name">Gridfinity Tracer</span>
+    </div>
+
+    <nav class="steps" role="tablist" aria-label="Workflow">
+      <button class="step" role="tab" id="tab-template" data-tab="template" aria-controls="view-template"><span class="step-num">1</span>Template</button>
+      <span class="step-arrow" data-icon="chevron"></span>
+      <button class="step" role="tab" id="tab-capture" data-tab="capture" aria-controls="view-capture"><span class="step-num">2</span>Photo</button>
+      <span class="step-arrow" data-icon="chevron"></span>
+      <button class="step" role="tab" id="tab-design" data-tab="design" aria-controls="view-design"><span class="step-num">3</span>Design <span class="badge" id="tab-design-count"></span></button>
+    </nav>
+
+    <div class="appbar-right">
+      <input type="text" id="design-name" class="title-input" aria-label="Design name" spellcheck="false" maxlength="80" />
+      <div class="btn-group">
+        <button id="undo" class="icon-btn" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><i data-icon="undo"></i></button>
+        <button id="redo" class="icon-btn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled><i data-icon="redo"></i></button>
       </div>
-      <details>
-        <summary>Using your own squared paper instead?</summary>
-        <p>Choose "Own paper" in step 2, drag the four corner handles onto the corners of a rectangle you know the size of (for example 36 × 50 squares of 5 mm), and enter its size.</p>
-      </details>
+      <button id="new-design" class="btn ghost hide-sm" title="Start a new design (can be undone)"><i data-icon="filePlus"></i><span class="label">New</span></button>
+      <button id="open-designs" class="btn ghost hide-sm" title="Save, open, export and import designs (Ctrl+S)"><i data-icon="folder"></i><span class="label">Designs</span></button>
+      <button id="show-shortcuts" class="icon-btn ghost" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><i data-icon="keyboard"></i></button>
+      <button id="download-stl" class="btn primary" disabled><i data-icon="download"></i>Download STL</button>
+    </div>
+  </header>
+
+  <main class="views">
+    <!-- ===================================================================== 1 · Template -->
+    <section class="view" id="view-template" role="tabpanel" aria-labelledby="tab-template">
+      <div class="template-layout">
+        <div class="paper-wrap"><div class="paper" id="template-preview" aria-label="Template preview"></div></div>
+        <div class="template-side">
+          <div class="eyebrow">Step 1 of 3</div>
+          <h1>Print the tracing template</h1>
+          <p class="lead">Lay your tools on the printed grid, take one photo, and get a Gridfinity bin with a pocket shaped to each of them.</p>
+          <ol class="howto">
+            <li><div><b>Print at actual size</b><span>Turn off "fit to page" and set scaling to 100%.</span></div></li>
+            <li><div><b>Check the 100 mm bar</b><span>Measure it with a ruler. If it's off, your printer scaled the page.</span></div></li>
+            <li><div><b>Lay out your items</b><span>Keep them inside the grid and clear of the four black squares.</span></div></li>
+          </ol>
+          <div class="control-row">
+            <span class="label">Paper</span>
+            <div class="seg" id="paper-seg" role="group" aria-label="Paper size">
+              <button data-paper="a4" class="active">A4</button>
+              <button data-paper="letter">US Letter</button>
+            </div>
+          </div>
+          <div class="control-row">
+            <button id="print-template" class="btn primary lg"><i data-icon="printer"></i>Print template</button>
+            <button id="download-template" class="btn lg"><i data-icon="download"></i>Download SVG</button>
+          </div>
+          <details class="more">
+            <summary>Using your own squared paper instead?</summary>
+            <p>That works too. In step 2, choose <b>Own paper</b>, drag the four corner handles onto the corners of a rectangle you know the size of (for example 36 × 50 squares of 5 mm) and enter its size. Shadow removal works best with the printed template.</p>
+          </details>
+          <button class="btn" data-goto="capture">I have my items laid out<i data-icon="arrowRight"></i></button>
+        </div>
+      </div>
     </section>
 
-    <section class="card" id="step-photo">
-      <h2><span class="num">2</span> Take a photo</h2>
-      <p>Shoot from straight above in soft, even light. Soft, even light works best. Shadows are mostly ignored, but hard, dark shadows can still sneak in, and you can erase them with the touch-up brush. White, very light or cyan items are hard to see on this paper.</p>
-      <div class="row">
-        <label class="file-button primary">Take photo
+    <!-- ===================================================================== 2 · Photo -->
+    <section class="view" id="view-capture" role="tabpanel" aria-labelledby="tab-capture" hidden>
+      <div class="toolbar-row">
+        <label class="btn primary"><i data-icon="camera"></i>Take photo
           <input type="file" id="photo-input" accept="image/*" capture="environment" hidden />
         </label>
-        <label class="file-button">Choose photo
+        <label class="btn"><i data-icon="image"></i>Choose photo
           <input type="file" id="photo-choose" accept="image/*" hidden />
         </label>
-        <label>Reference
+        <span class="sep"></span>
+        <label class="inline-field">Reference
           <select id="ref-mode">
-            <option value="template">Printed template (auto)</option>
+            <option value="template">Printed template</option>
             <option value="manual">Own paper (manual corners)</option>
           </select>
         </label>
-        <span id="manual-size" hidden>
-          <label>Width <input type="number" id="ref-w" value="180" min="10" step="5" /> mm</label>
-          <label>Height <input type="number" id="ref-h" value="250" min="10" step="5" /> mm</label>
+        <span id="manual-size" class="inline-field" hidden>
+          <label class="num narrow"><input type="number" id="ref-w" value="180" min="10" step="5" aria-label="Reference width" /><span>mm</span></label>
+          ×
+          <label class="num narrow"><input type="number" id="ref-h" value="250" min="10" step="5" aria-label="Reference height" /><span>mm</span></label>
         </span>
+        <span class="spacer"></span>
+        <span id="photo-status" class="status-chip" role="status"></span>
       </div>
-      <p id="photo-status" class="status"></p>
-      <div class="two-col" id="photo-views" hidden>
-        <div>
-          <h3>Photo <small>drag the corner handles if they are off</small></h3>
-          <canvas id="photo-canvas"></canvas>
-        </div>
-        <div>
-          <h3>Top-down view &amp; outlines</h3>
-          <canvas id="rect-canvas"></canvas>
-          <div class="row">
-            <span class="hint">Touch up:</span>
-            <button data-brush="erase" title="Paint over shadows or anything that isn't part of an item">Erase</button>
-            <button data-brush="add" title="Paint over parts of an item that were missed">Add</button>
-            <label>Brush <input type="range" id="brush-size" min="2" max="30" step="1" value="8" /></label>
-            <button id="brush-clear">Clear touch-ups</button>
-          </div>
-          <div class="row">
-            <label>Sensitivity <input type="range" id="threshold" min="0.05" max="0.6" step="0.01" value="0.25" /></label>
-            <span id="threshold-val">0.25</span>
-            <label>Smoothing <input type="range" id="smoothing" min="0" max="4" step="0.25" value="2" /></label>
-            <span id="smoothing-val">2 mm</span>
-          </div>
-        </div>
-      </div>
-      <div id="detected" hidden>
-        <h3>Detected outlines</h3>
-        <div id="detected-body" class="item-list"></div>
-        <div class="row"><button id="add-items" class="primary">Add selected to bin</button></div>
-      </div>
-    </section>
 
-    <section class="card" id="step-bin">
-      <div class="design-head">
-        <h2><span class="num">3</span> Design the bin <span id="design-name" class="design-name"></span></h2>
-        <div class="toolbar">
-          <button id="undo" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
-          <button id="redo" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" disabled>↷ Redo</button>
-          <span class="sep"></span>
-          <button id="new-design" title="Start an empty design (can be undone)">New</button>
-          <button id="open-designs" title="Save, open, export and import designs">Designs…</button>
-        </div>
+      <div id="capture-empty" class="dropzone">
+        <i data-icon="upload" class="big"></i>
+        <h2>Drop a photo of your items here</h2>
+        <p>or use <b>Take photo</b> / <b>Choose photo</b> above.</p>
+        <ul class="tips">
+          <li><i data-icon="check"></i>Shoot from straight above</li>
+          <li><i data-icon="check"></i>All four black squares in view</li>
+          <li><i data-icon="check"></i>Soft, even light, no flash glare</li>
+          <li><i data-icon="check"></i>Items flat and not touching</li>
+        </ul>
       </div>
-      <p id="design-status" class="hint"></p>
-      <div class="ws">
-        <div class="ws-main">
-          <div class="panel">
-            <div class="panel-head"><h3>Layout</h3><button id="arrange" title="Re-pack all items">Auto-arrange</button></div>
-            <canvas id="layout-canvas"></canvas>
-            <p class="hint">Drag items to move them; Shift-drag rotates. Drag a notch's white dot along the edge. <b>Depth zones</b> (dark = deeper, light = shallower): drag to move, square handle to resize.</p>
+
+      <div id="capture-work" class="capture-grid" hidden>
+        <div class="pane">
+          <div class="pane-head"><h3>Photo</h3><span class="hint">Drag the numbered handles onto the black squares if they're off</span></div>
+          <div class="pane-body"><canvas id="photo-canvas" aria-label="Photo with corner handles"></canvas></div>
+        </div>
+        <div class="pane">
+          <div class="pane-head">
+            <h3>Top-down view</h3>
+            <div class="seg sm" role="group" aria-label="Touch-up brush" style="margin-left:auto">
+              <button data-brush="off" class="active" title="No brush"><i data-icon="pointer"></i>View</button>
+              <button data-brush="erase" title="Paint over shadows or anything that isn't part of an item"><i data-icon="eraser"></i>Erase</button>
+              <button data-brush="add" title="Paint over parts of an item that were missed"><i data-icon="brush"></i>Add</button>
+            </div>
           </div>
-          <div class="panel" id="step-model">
-            <div class="panel-head"><h3>3D preview</h3><button id="download-stl" class="primary" disabled>Download STL</button></div>
-            <div id="viewer"></div>
-            <p id="model-info" class="status"></p>
-            <ul id="warnings"></ul>
+          <div class="pane-body"><canvas id="rect-canvas" aria-label="Corrected top-down view with outlines"></canvas></div>
+          <div class="pane-foot">
+            <label class="slider">Sensitivity <input type="range" id="threshold" min="0.05" max="0.6" step="0.01" value="0.25" /><output id="threshold-val">0.25</output></label>
+            <label class="slider">Smoothing <input type="range" id="smoothing" min="0" max="4" step="0.25" value="2" /><output id="smoothing-val">2 mm</output></label>
+            <label class="slider">Brush <input type="range" id="brush-size" min="2" max="30" step="1" value="8" /><output id="brush-val">8 mm</output></label>
+            <button id="brush-clear" class="btn xs ghost">Clear touch-ups</button>
           </div>
         </div>
-        <aside class="ws-side">
-          <details open>
-            <summary>Bin</summary>
-            <div class="form">
-              <label class="check"><input type="checkbox" id="auto-size" checked /> Auto size to fit items</label>
-              <label class="field"><span>Max size (printer bed)</span><span><input type="number" id="max-units" min="1" max="10" value="5" /> u</span></label>
-              <label class="field"><span>Width</span><span><input type="number" id="units-x" min="1" max="10" value="2" /> u</span></label>
-              <label class="field"><span>Depth</span><span><input type="number" id="units-y" min="1" max="10" value="2" /> u</span></label>
-              <label class="field"><span>Height <small>(0 = auto)</small></span><span><input type="number" id="units-z" min="0" max="20" value="0" /> u</span></label>
-              <label class="check"><input type="checkbox" id="magnets" /> Magnet holes (6 × 2 mm)</label>
-              <label class="check"><input type="checkbox" id="lip" checked /> Stacking lip</label>
-            </div>
-          </details>
-          <details open>
-            <summary>Pockets &amp; edges</summary>
-            <div class="form">
-              <label class="field"><span>Clearance around items</span><span><input type="number" id="clearance" min="0" max="5" step="0.1" value="1" /> mm</span></label>
-              <label class="field"><span>Wall between pockets</span><span><input type="number" id="spacing" min="0.8" max="10" step="0.1" value="2" /> mm</span></label>
-              <label class="field"><span>Finger notch radius</span><span><input type="number" id="finger" min="4" max="25" step="0.5" value="10" /> mm</span></label>
-              <label class="field"><span>Finger notch depth <small>(0 = auto)</small></span><span><input type="number" id="finger-depth" min="0" max="150" step="0.5" value="0" /> mm</span></label>
-              <label class="field"><span>Pocket rim edge</span><span><select id="rim-type"><option value="none">None</option><option value="chamfer">Chamfer</option><option value="fillet" selected>Fillet</option></select> <input type="number" id="rim-size" min="0.2" max="5" step="0.1" value="1" /> mm</span></label>
-              <label class="field"><span>Depth step edges</span><span><select id="step-type"><option value="none">None</option><option value="chamfer">Chamfer</option><option value="fillet" selected>Fillet</option></select> <input type="number" id="step-size" min="0.2" max="5" step="0.1" value="1" /> mm</span></label>
-            </div>
-          </details>
-          <details open>
-            <summary>Items <span id="item-count" class="hint"></span></summary>
-            <div class="row"><button id="add-test">Add test shape</button></div>
-            <div id="bin-items" class="item-list"></div>
-            <p id="empty-bin" class="hint">No items yet. Add some from a photo, or add a test shape.</p>
-          </details>
+        <aside class="pane outlines">
+          <div class="pane-head"><h3>Detected outlines</h3><span class="badge" id="detected-count"></span></div>
+          <div id="detected-body" class="detected-list"></div>
+          <div class="pane-foot"><button id="add-items" class="btn primary block" disabled><i data-icon="plus"></i><span>Add to bin</span></button></div>
         </aside>
       </div>
     </section>
+
+    <!-- ===================================================================== 3 · Design -->
+    <section class="view" id="view-design" role="tabpanel" aria-labelledby="tab-design" hidden>
+      <div class="design-grid">
+        <aside class="panel left" aria-label="Items">
+          <div class="panel-head"><h3>Items</h3><span class="badge" id="item-count"></span></div>
+          <div id="item-list" class="item-list" role="listbox" aria-label="Items in this bin"></div>
+          <div class="panel-foot">
+            <button class="btn sm" data-goto="capture"><i data-icon="camera"></i>Add from photo</button>
+            <button id="add-test" class="btn sm ghost" title="Add a 60 × 20 mm rectangle to try things out"><i data-icon="square"></i>Test shape</button>
+          </div>
+        </aside>
+
+        <div class="stage">
+          <div class="stage-bar">
+            <div class="seg" id="view-mode" role="group" aria-label="View">
+              <button data-mode="layout"><i data-icon="layout"></i>Layout</button>
+              <button data-mode="split"><i data-icon="split"></i>Split</button>
+              <button data-mode="3d"><i data-icon="cube"></i>3D</button>
+            </div>
+            <span class="spacer"></span>
+            <button id="arrange" class="btn sm" title="Pack all items into the smallest bin"><i data-icon="wand"></i>Auto-arrange</button>
+          </div>
+          <div class="stage-body" id="stage-body" data-mode="split">
+            <div class="stage-pane" id="pane-layout">
+              <span class="pane-label">Layout</span>
+              <div class="pane-tools"><button id="fit-view" class="icon-btn sm" title="Fit to view (F)" aria-label="Fit to view"><i data-icon="fit"></i></button></div>
+              <canvas id="layout-canvas" aria-label="Bin layout. Drag items to move them."></canvas>
+              <span class="canvas-hint">Scroll to zoom · drag the background to pan · <kbd>?</kbd> for shortcuts</span>
+              <div id="stage-empty" class="stage-empty">
+                <i data-icon="layout" class="big"></i>
+                <h2>Your bin is empty</h2>
+                <p>Take a photo of your items on the template, or add a test shape to try the designer.</p>
+                <div class="actions">
+                  <button class="btn primary" data-goto="capture"><i data-icon="camera"></i>Add from photo</button>
+                  <button class="btn" data-act="add-test">Add test shape</button>
+                </div>
+              </div>
+            </div>
+            <div class="stage-pane" id="pane-3d">
+              <span class="pane-label">3D preview</span>
+              <div class="pane-tools">
+                <div class="seg sm" id="cam-views" role="group" aria-label="Camera">
+                  <button data-cam="iso" class="active">Iso</button>
+                  <button data-cam="top">Top</button>
+                  <button data-cam="front">Front</button>
+                </div>
+              </div>
+              <div id="viewer"></div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="panel right" aria-label="Properties">
+          <div class="tabs" role="tablist">
+            <button class="tab" role="tab" data-ptab="item" id="ptab-item">Item</button>
+            <button class="tab" role="tab" data-ptab="bin" id="ptab-bin" aria-selected="true">Bin</button>
+          </div>
+          <div id="props" class="panel-body"></div>
+        </aside>
+
+        <footer class="statusbar">
+          <span id="model-info">—</span>
+          <button id="warn-btn" class="warn-chip" hidden aria-haspopup="true"><i data-icon="alert"></i><span id="warn-text"></span></button>
+          <span class="spacer"></span>
+          <span id="gen-info" class="muted"></span>
+          <span id="save-state" class="save-state muted"></span>
+        </footer>
+      </div>
+      <ul id="warnings" class="warn-pop" hidden></ul>
+    </section>
   </main>
-  <dialog id="designs-dialog" aria-labelledby="designs-title">
-    <form method="dialog" class="dlg">
-      <h3 id="designs-title">Designs</h3>
-      <p class="hint">Designs are saved in this browser. Export a file to keep a backup or move a design to another computer. Photos aren't saved, only outlines and layout.</p>
-      <div class="row">
-        <label class="grow">Name <input type="text" id="design-name-input" maxlength="80" /></label>
-        <button type="button" id="save-design" class="primary">Save</button>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<div id="drop-overlay" class="drop-overlay" hidden><div class="drop-card"><i data-icon="upload"></i><b>Drop to open</b><span class="hint">A photo to trace, or a .gridfinity.json design</span></div></div>
+
+<!-- ======================================================================= Dialogs -->
+<dialog id="designs-dialog" aria-labelledby="designs-title">
+  <form method="dialog">
+    <div class="dlg-head"><h3 id="designs-title">Designs</h3><button value="close" class="icon-btn ghost" aria-label="Close"><i data-icon="x"></i></button></div>
+    <div class="dlg-body">
+      <p class="hint">Designs are saved in this browser. Export a file to keep a backup or to move a design to another computer. Photos aren't saved, only outlines and layout.</p>
+      <div class="dlg-row">
+        <input type="text" id="design-name-input" maxlength="80" aria-label="Design name" placeholder="Design name" />
+        <button type="button" id="save-design" class="btn primary">Save</button>
       </div>
-      <p id="designs-status" class="status"></p>
+      <p id="designs-status" class="hint" role="status"></p>
       <div id="designs-list"></div>
-      <div class="row">
-        <button type="button" id="export-design">Export file…</button>
-        <label class="file-button">Import file…<input type="file" id="import-design" accept=".json,application/json" hidden /></label>
-        <span class="spacer"></span>
-        <button value="close">Close</button>
-      </div>
-    </form>
-  </dialog>
-  <footer>Gridfinity is an open modular storage system by Zack Freedman. Bins follow the common 42 × 42 × 7 mm spec.</footer>
-  <script type="module" src="./src/main.ts"></script>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" id="export-design" class="btn"><i data-icon="download"></i>Export file</button>
+      <label class="btn"><i data-icon="upload"></i>Import file<input type="file" id="import-design" accept=".json,application/json" hidden /></label>
+      <span class="spacer"></span>
+      <button value="close" class="btn">Close</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title">
+  <form method="dialog">
+    <div class="dlg-head"><h3 id="shortcuts-title">Keyboard shortcuts</h3><button value="close" class="icon-btn ghost" aria-label="Close"><i data-icon="x"></i></button></div>
+    <div class="dlg-body">
+      <table class="shortcuts">
+        <tr><td>Undo / redo</td><td><kbd>Ctrl</kbd><kbd>Z</kbd> &nbsp; <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Z</kbd></td></tr>
+        <tr><td>Save design</td><td><kbd>Ctrl</kbd><kbd>S</kbd></td></tr>
+        <tr><td>Duplicate item</td><td><kbd>Ctrl</kbd><kbd>D</kbd></td></tr>
+        <tr><td>Delete item or zone</td><td><kbd>Del</kbd></td></tr>
+        <tr><td>Rotate 90° / −90°</td><td><kbd>R</kbd> &nbsp; <kbd>Shift</kbd><kbd>R</kbd></td></tr>
+        <tr><td>Rotate 15°</td><td><kbd>[</kbd> <kbd>]</kbd></td></tr>
+        <tr><td>Nudge 1 mm / 10 mm</td><td><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> &nbsp; + <kbd>Shift</kbd></td></tr>
+        <tr><td>Rotation handle: snap 15° / free</td><td><kbd>Shift</kbd> &nbsp; <kbd>Alt</kbd></td></tr>
+        <tr><td>Deselect</td><td><kbd>Esc</kbd></td></tr>
+        <tr><td>Fit layout to view</td><td><kbd>F</kbd></td></tr>
+        <tr><td>Layout / Split / 3D view</td><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td></tr>
+      </table>
+    </div>
+    <div class="dlg-foot"><span class="hint">On a Mac, use <kbd>⌘</kbd> instead of <kbd>Ctrl</kbd>.</span><span class="spacer"></span><button value="close" class="btn">Done</button></div>
+  </form>
+</dialog>
+
+<script type="module" src="./src/main.ts"></script>
 </body>
 </html>
