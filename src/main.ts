@@ -28,6 +28,17 @@ import {
 } from './layout';
 import { buildBin, toStl } from './gridfinity';
 import { Preview } from './preview';
+import {
+  Design,
+  History,
+  deleteFromLibrary,
+  listSaved,
+  loadAutosave,
+  makeDesign,
+  parseDesign,
+  saveAutosave,
+  saveToLibrary,
+} from './storage';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const PPM = 4; // pixels per mm in the rectified image
@@ -59,6 +70,7 @@ let detected: Detected[] = [];
 const items: Item[] = [];
 let nextId = 1;
 const settings: BinSettings = defaultSettings();
+let designName = 'Untitled';
 let currentModel: Manifold | null = null;
 let preview: Preview | null = null;
 
@@ -522,6 +534,7 @@ function renderItems() {
     name.addEventListener('input', () => {
       it.name = name.value;
       drawLayout();
+      scheduleCommit();
     });
     depth.addEventListener('change', () => {
       it.depth = Math.max(1, +depth.value || it.depth);
@@ -851,6 +864,7 @@ function manualLayoutChanged() {
 
 let regenTimer = 0;
 function changed() {
+  scheduleCommit();
   drawLayout();
   clearTimeout(regenTimer);
   regenTimer = window.setTimeout(regenerate, 250);
@@ -890,6 +904,197 @@ $('download-stl').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------------------
+// Undo / redo and saving
+// ---------------------------------------------------------------------------------------
+const history = new History();
+let commitTimer = 0;
+let lastAutosaved = '';
+
+/** The design state that undo and autosave track (no timestamps, so equal states compare equal). */
+function snapshot(): string {
+  return JSON.stringify({ name: designName, settings, items });
+}
+
+function scheduleCommit() {
+  clearTimeout(commitTimer);
+  commitTimer = window.setTimeout(commitNow, 300);
+}
+
+/** Records the current state as an undo step (if it changed) and autosaves it. */
+function commitNow() {
+  clearTimeout(commitTimer);
+  const snap = snapshot();
+  history.commit(snap);
+  // Autosave whenever the design differs from what was last saved, including after undo/redo
+  // (which move through existing history without adding to it).
+  if (snap !== lastAutosaved) {
+    if (saveAutosave(makeDesign(designName, items, settings))) lastAutosaved = snap;
+    else designStatus("Couldn't autosave (browser storage is unavailable or full). Use Designs → Export to keep a copy.");
+  }
+  updateUndoButtons();
+}
+
+function updateUndoButtons() {
+  $<HTMLButtonElement>('undo').disabled = !history.canUndo;
+  $<HTMLButtonElement>('redo').disabled = !history.canRedo;
+  $('design-name').textContent = designName;
+}
+
+function designStatus(msg: string) {
+  $('design-status').textContent = msg;
+}
+
+/** Puts a design's settings into the form controls. */
+function writeInputs() {
+  const set = (id: string, v: string | number) => ($<HTMLInputElement>(id).value = String(v));
+  $<HTMLInputElement>('auto-size').checked = settings.autoSize;
+  set('max-units', settings.maxUnits);
+  set('units-x', settings.unitsX);
+  set('units-y', settings.unitsY);
+  set('units-z', settings.unitsZ);
+  set('clearance', settings.clearance);
+  set('spacing', settings.spacing);
+  set('finger', settings.fingerRadius);
+  set('finger-depth', settings.fingerDepth);
+  $<HTMLInputElement>('magnets').checked = settings.magnets;
+  $<HTMLInputElement>('lip').checked = settings.lip;
+  set('rim-type', settings.rimEdge.type);
+  set('rim-size', settings.rimEdge.size);
+  set('step-type', settings.stepEdge.type);
+  set('step-size', settings.stepEdge.size);
+}
+
+/** Replaces the whole design (items, settings, name) and refreshes the UI. */
+function applyState(state: { name: string; settings: BinSettings; items: Item[] }) {
+  items.length = 0;
+  items.push(...structuredClone(state.items));
+  nextId = Math.max(0, ...items.map((i) => i.id)) + 1;
+  Object.assign(settings, structuredClone(state.settings));
+  designName = state.name;
+  layoutWarnings = [];
+  writeInputs();
+  readSettings();
+  renderItems();
+  changed(); // redraws and regenerates; the commit it schedules is skipped if nothing differs
+  updateUndoButtons();
+}
+
+function undo() {
+  commitNow(); // don't lose an edit that hasn't been recorded yet
+  const s = history.undo();
+  if (s) applyState(JSON.parse(s));
+  updateUndoButtons();
+}
+function redo() {
+  commitNow();
+  const s = history.redo();
+  if (s) applyState(JSON.parse(s));
+  updateUndoButtons();
+}
+$('undo').addEventListener('click', undo);
+$('redo').addEventListener('click', redo);
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const t = e.target as HTMLElement;
+  // Leave text boxes their own undo.
+  if (t instanceof HTMLTextAreaElement || (t instanceof HTMLInputElement && t.type === 'text')) return;
+  const k = e.key.toLowerCase();
+  if (k === 'z' && !e.shiftKey) {
+    e.preventDefault();
+    undo();
+  } else if ((k === 'z' && e.shiftKey) || k === 'y') {
+    e.preventDefault();
+    redo();
+  }
+});
+
+$('new-design').addEventListener('click', () => {
+  commitNow();
+  applyState({ name: 'Untitled', settings: defaultSettings(), items: [] });
+  commitNow();
+  designStatus('Started a new design. Undo brings the previous one back.');
+});
+
+// Designs dialog: save / open / delete in the browser, export / import files.
+const dialog = $<HTMLDialogElement>('designs-dialog');
+const dlgStatus = (msg: string) => ($('designs-status').textContent = msg);
+
+function renderLibrary() {
+  const list = $('designs-list');
+  const saved = listSaved();
+  list.innerHTML = saved.length ? '' : '<p class="hint">No saved designs yet.</p>';
+  for (const e of saved) {
+    const row = document.createElement('div');
+    row.className = 'design-row';
+    row.innerHTML = `<div><b></b><br><span class="hint"></span></div>
+      <span><button data-open>Open</button> <button data-del aria-label="Delete">Delete</button></span>`;
+    row.querySelector('b')!.textContent = e.name;
+    row.querySelector('.hint')!.textContent = `${new Date(e.savedAt).toLocaleString()} · ${e.itemCount} item${e.itemCount === 1 ? '' : 's'}`;
+    row.querySelector('[data-open]')!.addEventListener('click', () => {
+      commitNow();
+      applyState(e.design);
+      commitNow();
+      dialog.close();
+      designStatus(`Opened "${e.name}". Undo goes back to what you had before.`);
+    });
+    row.querySelector('[data-del]')!.addEventListener('click', () => {
+      if (!confirm(`Delete the saved design "${e.name}"? This can't be undone.`)) return;
+      deleteFromLibrary(e.name);
+      renderLibrary();
+    });
+    list.appendChild(row);
+  }
+}
+
+$('open-designs').addEventListener('click', () => {
+  $<HTMLInputElement>('design-name-input').value = designName;
+  dlgStatus('');
+  renderLibrary();
+  dialog.showModal();
+});
+
+$('save-design').addEventListener('click', () => {
+  const name = $<HTMLInputElement>('design-name-input').value.trim() || 'Untitled';
+  const exists = listSaved().some((e) => e.name === name);
+  if (exists && name !== designName && !confirm(`Replace the saved design "${name}"?`)) return;
+  designName = name;
+  commitNow();
+  if (saveToLibrary(makeDesign(name, items, settings))) {
+    dlgStatus(`Saved "${name}".`);
+    designStatus(`Saved "${name}".`);
+  } else dlgStatus("Couldn't save: browser storage is unavailable or full. Use Export file instead.");
+  updateUndoButtons();
+  renderLibrary();
+});
+
+$('export-design').addEventListener('click', () => {
+  const name = $<HTMLInputElement>('design-name-input').value.trim() || designName;
+  const blob = new Blob([JSON.stringify(makeDesign(name, items, settings), null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${name.replace(/[^\w -]+/g, '_').trim() || 'design'}.gridfinity.json`;
+  a.click();
+  dlgStatus('Exported. Keep the file to open this design later or on another computer.');
+});
+
+$<HTMLInputElement>('import-design').addEventListener('change', async (e) => {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    const design: Design = parseDesign(JSON.parse(await file.text()));
+    commitNow();
+    applyState(design);
+    commitNow();
+    dialog.close();
+    designStatus(`Imported "${design.name}" (${design.items.length} item${design.items.length === 1 ? '' : 's'}). Undo goes back.`);
+  } catch (err) {
+    dlgStatus(`Couldn't import that file: ${err instanceof SyntaxError ? "it isn't valid JSON." : (err as Error).message}`);
+  }
+});
+
+// ---------------------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------------------
 (async () => {
@@ -902,12 +1107,20 @@ $('download-stl').addEventListener('click', () => {
     drawLayout();
   });
   readSettings();
+  const restored = loadAutosave();
+  if (restored && (restored.items.length || restored.name !== 'Untitled')) {
+    applyState(restored);
+    designStatus(`Restored your last design (${restored.items.length} item${restored.items.length === 1 ? '' : 's'}). Use New to start fresh.`);
+  }
   renderItems();
   drawLayout();
+  history.reset(snapshot());
+  lastAutosaved = snapshot();
+  updateUndoButtons();
   wasm = await Module({ locateFile: () => wasmUrl });
   wasm.setup();
   regenerate();
 })();
 
 // Exposed for automated tests.
-(window as unknown as { __gt: unknown }).__gt = { items, settings, get detected() { return detected; } };
+(window as unknown as { __gt: unknown }).__gt = { items, settings, undo, redo, commitNow, get detected() { return detected; } };

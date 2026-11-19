@@ -9,7 +9,8 @@ Photograph your items on a printed grid and get a [Gridfinity](https://gridfinit
    - **Shadows** are told apart from items by checking whether the printed grid lines are still visible at that spot (they show through a shadow, but not through an item) and by colour (shadows don't change it). A touch-up brush can erase or add areas by hand.
    - Using your own squared paper instead: choose *Own paper*, drag the four handles onto the corners of a rectangle you know the size of, and enter that size.
 3. **Design** (best on a computer: layout and live 3D preview side by side): items are rotated to their tightest orientation and packed into the smallest bin that fits your printer bed (or, if they can't fit, the most compact bigger bin, with a warning). The bin also resizes when you move items by hand. Drag to move, Shift-drag to rotate, set the depth of each item, add finger notches (drag them anywhere along the edge) and add **depth zones**: rectangles or circles that make part of a pocket deeper (e.g. under a handle) or shallower. Pocket rims and depth steps can be filleted or chamfered.
-4. **Download** a binary STL: standard 42 × 42 × 7 mm Gridfinity base profile, optional magnet holes and stacking lip, pockets offset by your clearance.
+4. **Save** your work: designs autosave in the browser, can be saved by name, and exported/imported as files. Undo/redo (Ctrl+Z / Ctrl+Shift+Z) covers every design change.
+5. **Download** a binary STL: standard 42 × 42 × 7 mm Gridfinity base profile, optional magnet holes and stacking lip, pockets offset by your clearance.
 
 ## Development
 
@@ -36,10 +37,10 @@ Pushing to `main` runs the tests and deploys to GitHub Pages. Enable it once und
 | `src/layout.ts` | Item model, auto-orientation, packing, notches |
 | `src/gridfinity.ts` | Bin geometry with [manifold-3d](https://github.com/elalish/manifold), STL export |
 | `src/preview.ts` | three.js preview |
+| `src/storage.ts` | Design file format, validation, autosave/library, undo history |
 
 ## Ideas / roadmap
 
-- Several photos merged into one bin (works now: add items from each photo in turn)
 - Per-item depth from a side photo
 - Better packing (nesting non-rectangular shapes)
 - Outline editing (paint to add or remove areas)

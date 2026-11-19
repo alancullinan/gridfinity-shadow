@@ -85,7 +85,17 @@
     </section>
 
     <section class="card" id="step-bin">
-      <h2><span class="num">3</span> Design the bin</h2>
+      <div class="design-head">
+        <h2><span class="num">3</span> Design the bin <span id="design-name" class="design-name"></span></h2>
+        <div class="toolbar">
+          <button id="undo" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
+          <button id="redo" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" disabled>↷ Redo</button>
+          <span class="sep"></span>
+          <button id="new-design" title="Start an empty design (can be undone)">New</button>
+          <button id="open-designs" title="Save, open, export and import designs">Designs…</button>
+        </div>
+      </div>
+      <p id="design-status" class="hint"></p>
       <div class="ws">
         <div class="ws-main">
           <div class="panel">
@@ -134,6 +144,24 @@
       </div>
     </section>
   </main>
+  <dialog id="designs-dialog" aria-labelledby="designs-title">
+    <form method="dialog" class="dlg">
+      <h3 id="designs-title">Designs</h3>
+      <p class="hint">Designs are saved in this browser. Export a file to keep a backup or move a design to another computer. Photos aren't saved, only outlines and layout.</p>
+      <div class="row">
+        <label class="grow">Name <input type="text" id="design-name-input" maxlength="80" /></label>
+        <button type="button" id="save-design" class="primary">Save</button>
+      </div>
+      <p id="designs-status" class="status"></p>
+      <div id="designs-list"></div>
+      <div class="row">
+        <button type="button" id="export-design">Export file…</button>
+        <label class="file-button">Import file…<input type="file" id="import-design" accept=".json,application/json" hidden /></label>
+        <span class="spacer"></span>
+        <button value="close">Close</button>
+      </div>
+    </form>
+  </dialog>
   <footer>Gridfinity is an open modular storage system by Zack Freedman. Bins follow the common 42 × 42 × 7 mm spec.</footer>
   <script type="module" src="./src/main.ts"></script>
 </body>
