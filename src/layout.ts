@@ -48,6 +48,8 @@ export interface BinSettings {
   magnets: boolean;
   lip: boolean;
   fingerRadius: number;
+  /** Finger notch depth in mm; 0 = automatic (80% of the pocket depth, at least 8 mm, at most the pocket). */
+  fingerDepth: number;
   /** Minimum solid material under the deepest pocket, mm (above the base profile). */
   floor: number;
   /** Largest bin side (in grid units) the printer bed can take. */
@@ -91,6 +93,7 @@ export function defaultSettings(): BinSettings {
     magnets: false,
     lip: true,
     fingerRadius: 10,
+    fingerDepth: 0,
     floor: 1.2,
     maxUnits: 5,
     rimEdge: { type: 'fillet', size: 1 },
@@ -394,7 +397,15 @@ export function defaultZone(item: Item, kind: DepthZone['kind']): DepthZone {
   return { kind, x: b.minX + b.w / 4, y: (b.minY + b.maxY) / 2, w: b.w / 2 + 2, h: b.h + 4, rotation: 0, depth };
 }
 
+/** Depth of an item's finger notches. */
+export function notchDepth(item: Item, settings: BinSettings): number {
+  return settings.fingerDepth > 0 ? settings.fingerDepth : Math.min(item.depth, Math.max(8, item.depth * 0.8));
+}
+
 export function requiredHeightUnits(items: Item[], settings: BinSettings): number {
-  const deepest = Math.max(0, ...items.flatMap((i) => [i.depth, ...i.zones.map((z) => z.depth)]));
+  const deepest = Math.max(
+    0,
+    ...items.flatMap((i) => [i.depth, ...i.zones.map((z) => z.depth), ...(i.notches.length ? [notchDepth(i, settings)] : [])]),
+  );
   return Math.max(2, Math.ceil((GF.baseHeight + settings.floor + deepest) / GF.heightUnit - 1e-9));
 }

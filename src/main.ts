@@ -416,6 +416,7 @@ function readSettings() {
   settings.clearance = Math.max(0, num('clearance'));
   settings.spacing = Math.max(0.8, num('spacing') || 2);
   settings.fingerRadius = Math.max(4, num('finger') || 10);
+  settings.fingerDepth = Math.max(0, num('finger-depth') || 0);
   settings.magnets = $<HTMLInputElement>('magnets').checked;
   settings.lip = $<HTMLInputElement>('lip').checked;
   for (const key of ['rim', 'step'] as const) {
@@ -431,7 +432,7 @@ function writeUnits() {
   $<HTMLInputElement>('units-x').value = String(settings.unitsX);
   $<HTMLInputElement>('units-y').value = String(settings.unitsY);
 }
-for (const id of ['units-x', 'units-y', 'units-z', 'clearance', 'spacing', 'finger', 'magnets', 'lip', 'max-units', 'rim-type', 'rim-size', 'step-type', 'step-size']) {
+for (const id of ['units-x', 'units-y', 'units-z', 'clearance', 'spacing', 'finger', 'finger-depth', 'magnets', 'lip', 'max-units', 'rim-type', 'rim-size', 'step-type', 'step-size']) {
   $(id).addEventListener('change', () => {
     readSettings();
     if (settings.autoSize && ['clearance', 'spacing', 'max-units', 'finger', 'rim-type', 'rim-size'].includes(id)) arrange();

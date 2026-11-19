@@ -173,6 +173,26 @@ describe('edge chamfers and fillets', () => {
   });
 });
 
+describe('finger notch depth', () => {
+  it('uses the set depth (and the bin grows for it), or the automatic depth', () => {
+    const base = { ...defaultSettings(), autoSize: false, unitsX: 2, unitsY: 1, unitsZ: 0, rimEdge: { type: 'none' as const, size: 0 }, stepEdge: { type: 'none' as const, size: 0 } };
+    const it = { ...item(1, 60, 20, 10), notches: [{ x: 0, y: -10 }] };
+    const v = (fingerDepth: number) => {
+      const r = buildBin(wasm, [it], { ...base, unitsZ: 5, fingerDepth });
+      const out = r.manifold.volume();
+      r.manifold.delete();
+      return out;
+    };
+    // Auto for a 10 mm pocket = 8 mm. Setting 4 mm leaves 4 mm more material in the notch's
+    // part outside the pocket; 8 mm matches auto exactly.
+    expect(v(8)).toBeCloseTo(v(0), 1);
+    const outside = Math.PI * 100 / 2 - 2 * 1; // half the 10 mm-radius circle sits outside (minus clearance band)
+    expect(v(4) - v(0)).toBeGreaterThan(outside * 4 * 0.8);
+    expect(v(4) - v(0)).toBeLessThan(outside * 4 * 1.2);
+    expect(requiredHeightUnits([it], { ...base, fingerDepth: 30 })).toBe(6);
+  });
+});
+
 describe('bin geometry', () => {
   it('builds a valid, watertight 2x1 bin with a pocket and notch', () => {
     const s = { ...defaultSettings(), autoSize: false, unitsX: 2, unitsY: 1, unitsZ: 3, magnets: true };

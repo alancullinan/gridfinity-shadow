@@ -1,5 +1,5 @@
 import type { CrossSection, Manifold, ManifoldToplevel } from 'manifold-3d';
-import { BinSettings, GF, Item, binOuterSize, placedLoops, placedNotches, placedZone, requiredHeightUnits } from './layout';
+import { BinSettings, GF, Item, binOuterSize, notchDepth, placedLoops, placedNotches, placedZone, requiredHeightUnits } from './layout';
 
 /** Tracks WASM objects so intermediates can be freed in one go. */
 class Scope {
@@ -102,10 +102,10 @@ export function buildBin(wasm: ManifoldToplevel, items: Item[], settings: BinSet
     // pocket, so the pocket stays at full depth), the pocket, then each zone clipped to it.
     const layers: { region: CrossSection; depth: number }[] = [];
     let shape = pocket;
-    const notchDepth = Math.min(item.depth, Math.max(8, item.depth * 0.8));
+    const nDepth = notchDepth(item, settings);
     for (const nc of placedNotches(item)) {
       const circle = s.t(s.t(CrossSection.circle(settings.fingerRadius, SEGS)).translate([nc.x, -nc.y]));
-      layers.push({ region: s.t(circle.subtract(pocket)), depth: notchDepth });
+      layers.push({ region: s.t(circle.subtract(pocket)), depth: nDepth });
       shape = s.t(shape.add(circle));
     }
     sumArea += shape.area();
