@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TEMPLATE_GRID, SHEETS, markerCenters, workRegion, ignoreZones, MARKER_SIZE, GRID_PITCH } from '../src/sheet';
 import { computeHomography, applyHomography, rectify } from '../src/vision/homography';
+import { dewarpByGrid } from '../src/vision/dewarp';
 import { detectMarkers } from '../src/vision/markers';
 import { segmentItems } from '../src/vision/segment';
 import { createImage } from '../src/vision/image';
@@ -67,7 +68,12 @@ function analyse(rotate90: boolean) {
   expect(pts).not.toBeNull();
   const region = workRegion(sheet);
   const ppm = 4;
-  const rect = rectify(photo, pts!, markerCenters(sheet), region, ppm);
+  let rect = rectify(photo, pts!, markerCenters(sheet), region, ppm);
+  const markers = ignoreZones(sheet).filter((z) => z.w < 30).map((z) => ({ x: z.x - region.x, y: z.y - region.y, w: z.w, h: z.h }));
+  const dw = dewarpByGrid(rect, ppm, TEMPLATE_GRID, markers);
+  expect(dw, 'grid dewarp').not.toBeNull();
+  expect(dw!.maxShiftMm).toBeLessThan(0.6); // a flat synthetic sheet needs (almost) no correction
+  rect = dw!.image;
   return segmentItems(rect, { ppm, origin: region, ignore: ignoreZones(sheet), threshold: 0.25, grid: TEMPLATE_GRID });
 }
 

@@ -192,3 +192,47 @@ export function fillHoles(mask: Uint8Array, w: number, h: number): Uint8Array {
   for (let i = 0; i < w * h; i++) out[i] = outside[i] ? 0 : 1;
   return out;
 }
+
+/**
+ * Thin dark lines: pixels darker (by `ratio`) than the paper on both sides of them, within r
+ * pixels, either left/right (a vertical line) or above/below (a horizontal line). Unlike a simple
+ * "darker than nearby" test, an item's edge (paper on one side only) doesn't count.
+ * @param minPaper the brighter sides must be at least this bright (same units as `bright`)
+ */
+export function ridgeMask(
+  bright: Float32Array,
+  w: number,
+  h: number,
+  r: number,
+  ratio: number,
+  minPaper: number,
+  /** If given, receives the paper brightness beside each line pixel (the dimmer side). */
+  sideOut?: Float32Array,
+): Uint8Array {
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const b = bright[i];
+      let l = 0, rt = 0, u = 0, d = 0;
+      for (let k = 1; k <= r; k++) {
+        if (x - k >= 0) l = Math.max(l, bright[i - k]);
+        if (x + k < w) rt = Math.max(rt, bright[i + k]);
+        if (y - k >= 0) u = Math.max(u, bright[i - k * w]);
+        if (y + k < h) d = Math.max(d, bright[i + k * w]);
+      }
+      // A line has similar paper on both sides; an item's edge (paper on one side only) doesn't.
+      const vOk = Math.min(l, rt) >= 0.7 * Math.max(l, rt), hOk = Math.min(u, d) >= 0.7 * Math.max(u, d);
+      const vSide = vOk ? Math.min(l, rt) : 0, hSide = hOk ? Math.min(u, d) : 0;
+      const side = Math.max(vSide, hSide);
+      if (side > minPaper && b < side * ratio) {
+        out[i] = 1;
+        if (sideOut) {
+          // A trustworthy paper sample only if both sides agree closely (not at a shadow's edge).
+          const [p, q] = vSide >= hSide ? [l, rt] : [u, d];
+          sideOut[i] = Math.min(p, q) >= 0.85 * Math.max(p, q) ? side : -1;
+        }
+      }
+    }
+  return out;
+}

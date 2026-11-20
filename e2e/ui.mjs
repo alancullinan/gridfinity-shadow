@@ -21,7 +21,12 @@ page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 page.on('dialog', (d) => d.accept());
 const gt = (fn, arg) => page.evaluate(fn, arg);
-const settle = (ms = 450) => page.waitForTimeout(ms);
+// Wait for the UI, then record the undo step explicitly (rapid edits within ~300 ms would
+// otherwise merge into one step when the machine is busy rebuilding the model).
+const settle = async (ms = 450) => {
+  await page.waitForTimeout(ms);
+  await page.evaluate(() => window.__gt.commitNow());
+};
 const item0 = () => gt(() => JSON.parse(JSON.stringify(window.__gt.items[0])));
 const at = async (x, y) => gt(([x, y]) => window.__gt.clientPoint(x, y), [x, y]);
 async function drag(from, to, steps = 8) {

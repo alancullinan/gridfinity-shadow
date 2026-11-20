@@ -65,10 +65,20 @@ export const TEMPLATE_GRID = { pitch: GRID_PITCH, offsetX: REGION_PAD, offsetY: 
 /** Areas (markers plus a little padding) that must be ignored when looking for items. */
 export function ignoreZones(sheet: SheetSpec): Rect[] {
   const pad = 3;
-  return markerCenters(sheet).map((c) => ({
+  const markers = markerCenters(sheet).map((c) => ({
     x: c.x - MARKER_SIZE / 2 - pad,
     y: c.y - MARKER_SIZE / 2 - pad,
     w: MARKER_SIZE + 2 * pad,
     h: MARKER_SIZE + 2 * pad,
   }));
+  // The thin margin outside the outermost grid lines (kept in the image so those lines are
+  // fully visible) isn't part of the tracing area.
+  const m = SHEET_MARGIN, b = REGION_PAD + 1.2, W = sheet.width, H = sheet.height;
+  const border = [
+    { x: m - REGION_PAD, y: m - REGION_PAD, w: W - 2 * (m - REGION_PAD), h: b },
+    { x: m - REGION_PAD, y: H - m + REGION_PAD - b, w: W - 2 * (m - REGION_PAD), h: b },
+    { x: m - REGION_PAD, y: m - REGION_PAD, w: b, h: H - 2 * (m - REGION_PAD) },
+    { x: W - m + REGION_PAD - b, y: m - REGION_PAD, w: b, h: H - 2 * (m - REGION_PAD) },
+  ];
+  return [...markers, ...border];
 }

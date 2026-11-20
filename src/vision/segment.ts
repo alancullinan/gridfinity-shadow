@@ -1,5 +1,5 @@
 import type { Point, Rect } from '../sheet';
-import { RGBAImage, fillHoles, labelComponents, morph } from './image';
+import { RGBAImage, fillHoles, labelComponents, morph, ridgeMask } from './image';
 import { simplifyClosed, smoothClosed, traceLoops } from './contour';
 import { polygonArea } from './markers';
 
@@ -124,6 +124,71 @@ function paperModel(img: RGBAImage, ignored: Uint8Array, block: number): ((x: nu
   };
 }
 
+/** Separable sliding-window maximum with a (2r+1)² square window. */
+function maxFilter(src: Float32Array, w: number, h: number, r: number): Float32Array {
+  const tmp = new Float32Array(w * h), out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      let m = -Infinity;
+      for (let k = Math.max(0, x - r); k <= Math.min(w - 1, x + r); k++) m = Math.max(m, src[y * w + k]);
+      tmp[y * w + x] = m;
+    }
+  for (let x = 0; x < w; x++)
+    for (let y = 0; y < h; y++) {
+      let m = -Infinity;
+      for (let k = Math.max(0, y - r); k <= Math.min(h - 1, y + r); k++) m = Math.max(m, tmp[k * w + x]);
+      out[y * w + x] = m;
+    }
+  return out;
+}
+
+/**
+ * Paper brightness (1 − darkness) across the image, averaged from samples (−1 = no sample) in
+ * small cells and filled smoothly underneath items.
+ */
+function illuminationMap(sample: Float32Array, w: number, h: number, cell: number) {
+  const cw = Math.ceil(w / cell), ch = Math.ceil(h / cell);
+  const sum = new Float32Array(cw * ch), cnt = new Float32Array(cw * ch);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const v = sample[y * w + x];
+      if (v < 0) continue;
+      const c = ((y / cell) | 0) * cw + ((x / cell) | 0);
+      sum[c] += v;
+      cnt[c]++;
+    }
+  const val = new Float32Array(cw * ch), known = new Uint8Array(cw * ch);
+  let tot = 0, nk = 0;
+  for (let c = 0; c < cw * ch; c++)
+    if (cnt[c] >= cell * cell * 0.4) { // sparse samples are more likely texture on an item
+      val[c] = sum[c] / cnt[c];
+      known[c] = 1;
+      tot += val[c];
+      nk++;
+    }
+  const avg = nk ? tot / nk : 1;
+  for (let c = 0; c < cw * ch; c++) if (!known[c]) val[c] = avg;
+  for (let iter = 0; iter < 200; iter++)
+    for (let cy = 0; cy < ch; cy++)
+      for (let cx = 0; cx < cw; cx++) {
+        const c = cy * cw + cx;
+        if (known[c]) continue;
+        let s = 0, k = 0;
+        if (cx > 0) (s += val[c - 1]), k++;
+        if (cx < cw - 1) (s += val[c + 1]), k++;
+        if (cy > 0) (s += val[c - cw]), k++;
+        if (cy < ch - 1) (s += val[c + cw]), k++;
+        val[c] = s / k;
+      }
+  return (x: number, y: number) => {
+    const gx = Math.min(cw - 1.001, Math.max(0, x / cell - 0.5)), gy = Math.min(ch - 1.001, Math.max(0, y / cell - 0.5));
+    const x0 = Math.floor(gx), y0 = Math.floor(gy), tx = gx - x0, ty = gy - y0;
+    const x1 = Math.min(cw - 1, x0 + 1), y1 = Math.min(ch - 1, y0 + 1);
+    const v = (val[y0 * cw + x0] * (1 - tx) + val[y0 * cw + x1] * tx) * (1 - ty) + (val[y1 * cw + x0] * (1 - tx) + val[y1 * cw + x1] * tx) * ty;
+    return Math.max(0.05, v);
+  };
+}
+
 export interface InkOptions {
   /** Pixels per millimetre. */
   ppm: number;
@@ -134,6 +199,13 @@ export interface InkOptions {
   shadowLevel?: number;
   /** Printed grid, if known: line pitch and the position of one line, in mm from the image origin. */
   grid?: { pitch: number; offsetX: number; offsetY: number };
+  /**
+   * If given, set to 1 where the printed grid is hidden but should be visible and the pixel is at
+   * least slightly darker than paper: strong evidence of an item even when it's pale or shiny.
+   */
+  hidden?: Uint8Array;
+  /** Filled with intermediate maps for debugging, if given. */
+  debug?: { line?: Float32Array; paper?: Uint8Array; gridFound?: boolean; rel?: Float32Array; illum?: Float32Array };
 }
 
 /**
@@ -176,10 +248,80 @@ function gridVisibility(line: Float32Array, w: number, h: number, ppm: number, g
   const seen = (sum: Float32Array, pos: number[], len: number) => pos.filter((q) => sum[q] > len * 0.25).length;
   if (seen(colSum, xs, h) < xs.length * 0.5 || seen(rowSum, ys, w) < ys.length * 0.5) return null;
 
+  // Printed lines are rarely perfectly straight in a photo (paper curl, lens distortion). Find
+  // the line in each short segment near where it should be, then fit a gentle curve through those
+  // points, rejecting outliers (item edges and print that happen to be nearby).
+  const segLen = Math.max(8, Math.round(pitch));
+  // After un-bending (dewarpByGrid) lines are within a pixel or two of where they should be, so a
+  // narrow search is enough and keeps nearby item edges from pulling the fit off.
+  const near = Math.max(2, Math.round(0.75 * ppm));
+  const trackLine = (p0: number, len: number, across: number, at: (a: number, c: number) => number) => {
+    const pts: { a: number; c: number }[] = [];
+    for (let s0 = 0; s0 < len; s0 += segLen) {
+      const s1 = Math.min(len, s0 + segLen);
+      let best = -1, bestC = -1;
+      for (let d = -near; d <= near; d++) {
+        const c = Math.round(p0 + d);
+        if (c < 1 || c >= across - 1) continue;
+        let cnt = 0;
+        for (let a = s0; a < s1; a++) cnt += at(a, c) + 0.5 * (at(a, c - 1) + at(a, c + 1));
+        if (cnt > bestC) (bestC = cnt), (best = c);
+      }
+      if (best >= 0 && bestC >= (s1 - s0) * 0.6) pts.push({ a: (s0 + s1) / 2, c: best });
+    }
+    // Robust quadratic fit c(a) = k0 + k1 t + k2 t², t = a / len.
+    let coef: number[] = [p0, 0, 0];
+    let use = pts;
+    for (let iter = 0; iter < 4 && use.length >= 5; iter++) {
+      const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], b = [0, 0, 0];
+      for (const { a, c } of use) {
+        const t = a / len, f = [1, t, t * t];
+        for (let i = 0; i < 3; i++) {
+          b[i] += f[i] * c;
+          for (let j = 0; j < 3; j++) A[i][j] += f[i] * f[j];
+        }
+      }
+      const sol = solveSmall(A, b);
+      if (!sol) break;
+      coef = sol;
+      const fit = (a: number) => coef[0] + coef[1] * (a / len) + coef[2] * (a / len) ** 2;
+      const next = pts.filter(({ a, c }) => Math.abs(c - fit(a)) <= 1.5);
+      if (next.length === use.length) break;
+      use = next;
+    }
+    const out = new Float32Array(len);
+    for (let a = 0; a < len; a++) {
+      const v = coef[0] + coef[1] * (a / len) + coef[2] * (a / len) ** 2;
+      out[a] = Math.abs(v - p0) <= near ? v : p0; // never wander off the expected position
+    }
+    return out;
+  };
+  const pathV = xs.map((x0) => trackLine(x0, h, w, (a, c) => line[a * w + c]));
+  const pathH = ys.map((y0) => trackLine(y0, w, h, (a, c) => line[c * w + a]));
+
+  // A line counts as visible at a point only if it runs nearly unbroken for ±1.25 mm there: real
+  // grid lines are continuous, while texture on an item (machining marks, print, edges) isn't.
+  const runL = Math.max(2, Math.round(1.25 * ppm));
+  const continuous = (has: Uint8Array) => {
+    // Visible if the line runs nearly unbroken on either side of the point, so paper right up to
+    // an item's edge still counts (its line continues away from the item).
+    const len = has.length;
+    const pre = new Int32Array(len + 1);
+    for (let i = 0; i < len; i++) pre[i + 1] = pre[i] + has[i];
+    const need = Math.ceil((runL + 1) * 0.8);
+    const out = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      const left = pre[i + 1] - pre[Math.max(0, i - runL)];
+      const right = pre[Math.min(len, i + runL + 1)] - pre[i];
+      out[i] = left >= need || right >= need ? 1 : 0;
+    }
+    return out;
+  };
   // visV[k][y]: vertical line k visible at row y; visH[k][x]: horizontal line k visible at column x.
-  const visV = xs.map((x0) => {
+  const visV = pathV.map((path) => {
     const v = new Uint8Array(h);
     for (let y = 0; y < h; y++) {
+      const x0 = Math.round(path[y]);
       let any = 0;
       for (let dy = -1; dy <= 1 && !any; dy++) {
         const yy = y + dy;
@@ -188,11 +330,12 @@ function gridVisibility(line: Float32Array, w: number, h: number, ppm: number, g
       }
       v[y] = any;
     }
-    return v;
+    return continuous(v);
   });
-  const visH = ys.map((y0) => {
+  const visH = pathH.map((path) => {
     const v = new Uint8Array(w);
     for (let x = 0; x < w; x++) {
+      const y0 = Math.round(path[x]);
       let any = 0;
       for (let dx = -1; dx <= 1 && !any; dx++) {
         const xx = x + dx;
@@ -201,7 +344,7 @@ function gridVisibility(line: Float32Array, w: number, h: number, ppm: number, g
       }
       v[x] = any;
     }
-    return v;
+    return continuous(v);
   });
   // Index of the line at or before each column / row (-1 if none).
   const before = (len: number, pos: number[]) => {
@@ -214,17 +357,30 @@ function gridVisibility(line: Float32Array, w: number, h: number, ppm: number, g
     return idx;
   };
   const colIdx = before(w, xs), rowIdx = before(h, ys);
-  /** True if the grid is visible around (x, y) in both directions, i.e. this is paper (maybe shadowed). */
-  return (x: number, y: number): boolean => {
+  /**
+   * How sure we are that (x, y) is paper (possibly shadowed): 2 = the grid is visible on all four
+   * sides; 1 = visible on at least one side each way (paper, or an item's edge near paper);
+   * 0 = hidden.
+   */
+  const classify = (x: number, y: number): 0 | 1 | 2 => {
     const ky = rowIdx[y];
     const up = ky >= 0 && visH[ky][x] === 1;
     const down = ky + 1 < ys.length && visH[ky + 1][x] === 1;
-    if (!up && !down) return false;
+    if (!up && !down) return 0;
     const kx = colIdx[x];
     const left = kx >= 0 && visV[kx][y] === 1;
     const right = kx + 1 < xs.length && visV[kx + 1][y] === 1;
-    return left || right;
+    if (!left && !right) return 0;
+    return up && down && left && right ? 2 : 1;
   };
+  /** True if (x, y) lies on a grid line that is visible there. */
+  const onLine = (x: number, y: number): boolean => {
+    const kx = colIdx[x], ky = rowIdx[y];
+    for (const k of [kx, kx + 1]) if (k >= 0 && k < xs.length && visV[k][y] && Math.abs(pathV[k][y] - x) <= band) return true;
+    for (const k of [ky, ky + 1]) if (k >= 0 && k < ys.length && visH[k][x] && Math.abs(pathH[k][x] - y) <= band) return true;
+    return false;
+  };
+  return { classify, onLine };
 }
 
 /**
@@ -250,7 +406,8 @@ export function inkMap(img: RGBAImage, ignored: Uint8Array, opts: InkOptions): F
   const n = w * h;
   const dark = new Float32Array(n); // 1 - brightness relative to paper, ignoring the red channel
   const chroma = new Float32Array(n); // how coloured the pixel is relative to paper
-  const line = new Float32Array(n); // 1 where a cyan grid line is visible (in light or shadow)
+  const line = new Float32Array(n); // 1 where a grid line is visible (in light or shadow)
+  const bright = new Float32Array(n); // brightness relative to paper
   const p = [0, 0, 0];
   for (let y = 0; y < h; y++) {
     const gy = y / step, gy0 = Math.floor(gy), fy = gy - gy0;
@@ -274,11 +431,74 @@ export function inkMap(img: RGBAImage, ignored: Uint8Array, opts: InkOptions): F
       const gb = Math.abs(ng - nb);
       chroma[i] = gb + Math.max(0, nr - Math.max(ng, nb));
       const mean = (ng + nb) / 2;
+      // Cyan lines (as designed): red dips while green and blue stay put.
       line[i] = mean > 0.15 && gb < 0.12 && nr / mean < 0.9 ? 1 : 0;
+      bright[i] = Math.min(nr, ng, nb);
+    }
+  }
+  // Lines of any colour (many printers print the grid grey or black): a thin stripe clearly
+  // darker than the brightest paper right next to it. As a ratio it works the same in light and
+  // in shadow, and it ignores dark areas (inside an item there's no bright paper nearby).
+  const lineSide = new Float32Array(n).fill(-1);
+  const ridge = ridgeMask(bright, w, h, Math.max(2, Math.round(ppm * 0.75)), 0.86, 0.3, lineSide);
+  for (let i = 0; i < n; i++) if (!line[i] && !ignored[i] && ridge[i] && chroma[i] < 0.15) line[i] = 1;
+
+
+  const onPaper = opts.grid ? gridVisibility(line, w, h, ppm, opts.grid) : null;
+  if (opts.debug) {
+    opts.debug.line = line;
+    opts.debug.gridFound = !!onPaper;
+    if (onPaper) {
+      const paper = new Uint8Array(n);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) paper[y * w + x] = onPaper.classify(x, y);
+      opts.debug.paper = paper;
     }
   }
 
-  const onPaper = opts.grid ? gridVisibility(line, w, h, ppm, opts.grid) : null;
+  // With the grid visible, estimate the local paper brightness (shadows included) from spots that
+  // are certainly paper, and judge everything else against it rather than against lit paper.
+  let state: Uint8Array | null = null;
+  let illum: ((x: number, y: number) => number) | null = null;
+  if (onPaper) {
+    state = new Uint8Array(n);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) state[y * w + x] = onPaper.classify(x, y);
+    // Paper brightness samples: certain-paper pixels, plus the paper right beside every visible
+    // grid line (lines stay visible in shadow right up to an item's edge).
+    // Beside a line, take the dimmer side: where a line runs along a shadow's edge, the lit side
+    // would make the shadow look darker than its paper.
+    const sample = new Float32Array(n).fill(-1);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (ignored[i]) continue;
+        if (line[i]) {
+          if (!onPaper.onLine(x, y) || lineSide[i] < 0) continue;
+          const side = lineSide[i];
+          sample[i] = side;
+          // The paper within ~1 mm of a visible line is paper too: sample it where its brightness
+          // agrees with the line's paper (so an item touching the line isn't included).
+          const r = Math.max(2, Math.round(ppm * 0.9));
+          for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++)
+            for (let xx = Math.max(0, x - r); xx <= Math.min(w - 1, x + r); xx++) {
+              const j = yy * w + xx;
+              if (line[j] || ignored[j] || sample[j] >= 0) continue;
+              const v = 1 - dark[j];
+              if (v >= side * 0.9 && v <= side * 1.12) sample[j] = v;
+            }
+        } else if (state[i] === 2 && sample[i] < 0) sample[i] = 1 - dark[i];
+      }
+    const cell = Math.max(3, Math.round(1.5 * ppm));
+    const first = illuminationMap(sample, w, h, cell);
+    // Second pass: drop samples much darker than the map around them (texture on an item that
+    // slipped through), then rebuild.
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (sample[i] >= 0 && sample[i] < 0.8 * first(x, y)) sample[i] = -1;
+      }
+    illum = illuminationMap(sample, w, h, cell);
+
+  }
 
   const ink = new Float32Array(n);
   for (let y = 0; y < h; y++)
@@ -289,8 +509,32 @@ export function inkMap(img: RGBAImage, ignored: Uint8Array, opts: InkOptions): F
       const colourInk = Math.min(1, chroma[i] * 2);
       let neutralInk: number;
       if (d > 0.7) neutralInk = d; // nearly black: always an item
-      else if (onPaper) neutralInk = onPaper(x, y) ? d * 0.3 : d; // grid visible -> paper or shadow
-      else neutralInk = d > shadowLevel ? d : d * 0.3;
+      else if (state && illum) {
+        // Darkness (or brightness, e.g. shiny steel) relative to the paper around it.
+        const rel = 1 - (1 - d) / illum(x, y);
+        const st = state[i];
+        if (opts.debug) {
+          (opts.debug.rel ??= new Float32Array(n))[i] = rel;
+          (opts.debug.illum ??= new Float32Array(n))[i] = illum(x, y);
+        }
+        // Pixels on a visible grid line are darker than paper by design; never count them as item
+        // evidence (otherwise lines running up to an item would stick out of it as spikes). Line-
+        // like texture on an item (a ridged grip, print) isn't on a visible grid line, so it counts.
+        if (line[i] && st > 0 && onPaper!.onLine(x, y)) neutralInk = d * 0.3;
+        // Clearly darker than the paper around it: an item, even if line-like texture on it (a
+        // ridged grip, a ruler's ticks) fooled the grid check.
+        else if (rel > 0.4) neutralInk = Math.max(d, rel);
+        else if (st === 2) neutralInk = d * 0.3; // grid visible all round: paper, maybe in shadow
+        else if (st === 1) {
+          // Near an item's edge: paper if it matches the local paper, otherwise item.
+          neutralInk = d * 0.3;
+          if (opts.hidden && (rel > 0.3 || rel < -0.35 || chroma[i] > 0.08)) opts.hidden[i] = 1;
+        } else {
+          neutralInk = Math.max(0, rel);
+          // The grid is hidden here: an item if it differs at all from the paper around it.
+          if (opts.hidden && (rel > 0.06 || rel < -0.25 || chroma[i] > 0.05)) opts.hidden[i] = 1;
+        }
+      } else neutralInk = d > shadowLevel ? d : d * 0.3;
       ink[i] = Math.max(colourInk, neutralInk);
     }
   return ink;
@@ -307,9 +551,14 @@ export function segmentItems(img: RGBAImage, opts: SegmentOptions): SegmentResul
     const y1 = Math.min(h, Math.ceil((z.y + z.h - origin.y) * ppm));
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) ignored[y * w + x] = 1;
   }
-  const ink = inkMap(img, ignored, { ppm, shadowLevel: opts.shadowLevel, grid: opts.grid });
+  const hidden = new Uint8Array(w * h);
+  const ink = inkMap(img, ignored, { ppm, shadowLevel: opts.shadowLevel, grid: opts.grid, hidden });
+  // Hidden-grid evidence comes in solid patches on real items; drop isolated specks (e.g. where a
+  // grid line meets a soft shadow edge) before using it.
+  const rSpeck = Math.max(1, Math.round(ppm * 0.4));
+  const solidHidden = morph(morph(hidden, w, h, rSpeck, false), w, h, rSpeck, true);
   let mask = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) mask[i] = !ignored[i] && ink[i] > opts.threshold ? 1 : 0;
+  for (let i = 0; i < w * h; i++) mask[i] = !ignored[i] && (ink[i] > opts.threshold || solidHidden[i]) ? 1 : 0;
   // Remove thin grid-line remnants and speckle, then close small gaps and fill holes.
   const rOpen = Math.max(1, Math.round(ppm * 0.4));
   const rClose = Math.max(1, Math.round(ppm * 0.75));
@@ -324,7 +573,8 @@ export function segmentItems(img: RGBAImage, opts: SegmentOptions): SegmentResul
   const minArea = (opts.minAreaMm2 ?? 30) * ppm * ppm;
   const outlines: DetectedOutline[] = [];
   for (const c of comps) {
-    if (c.area < minArea) {
+    const thinMm = Math.min(c.maxX - c.minX + 1, c.maxY - c.minY + 1) / ppm;
+    if (c.area < minArea || thinMm < 2.5) {
       for (let y = c.minY; y <= c.maxY; y++)
         for (let x = c.minX; x <= c.maxX; x++) if (labels[y * w + x] === c.label) mask[y * w + x] = 0;
       continue;
