@@ -49,6 +49,7 @@ await page.click('[data-paper="a4"]');
 // --- Photo tab
 await page.click('#tab-capture');
 check('Photo tab shows the drop zone first', await page.isVisible('#capture-empty'));
+await page.check('#auto-detect'); // these tests check automatic detection
 await page.setInputFiles('#photo-choose', photo);
 await page.waitForFunction(() => window.__gt.detected.length > 0);
 check('outlines detected', (await gt(() => window.__gt.detected.length)) === 4, await page.textContent('#photo-status'));

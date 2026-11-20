@@ -30,7 +30,13 @@ async function drag(a, b, steps = 10) {
 await page.goto('http://localhost:5173/');
 await page.waitForFunction(() => document.body.dataset.modelReady);
 await page.click('#tab-capture');
+// Default: trace from scratch.
 await page.setInputFiles('#photo-choose', photo);
+await page.waitForFunction(() => /trace your items/.test(document.getElementById('photo-status').textContent));
+check('auto-detect is off by default: no outlines, pen ready', (await gt(() => window.__gt.detected.length)) === 0 && (await page.locator('[data-tool="pen"].active').count()) === 1);
+check('sliders hidden while tracing by hand', !(await page.isVisible('#threshold')));
+await page.keyboard.press('Escape');
+await page.check('#auto-detect');
 await page.waitForFunction(() => window.__gt.detected.length > 0);
 const auto = (await shapes()).length;
 check('automatic outlines become editable paths', auto === 4 && (await shapes()).every((s) => s.nodes >= 3 && s.nodes < 80), JSON.stringify((await shapes()).map((s) => s.nodes)));

@@ -46,6 +46,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 await page.goto(URL);
 await page.click('#tab-capture');
+await page.check('#auto-detect'); // these tests check automatic detection
 await page.setInputFiles('#photo-choose', photoPath);
 await page.waitForFunction(() => window.__gt.detected.length > 0, null, { timeout: 20000 });
 const status = await page.textContent('#photo-status');

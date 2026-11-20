@@ -45,6 +45,8 @@ let gridCorrection = 0;
 let method: 'grid' | 'brightness' = 'brightness';
 export let detected: Detected[] = [];
 
+const AUTO_KEY = 'gt.autoDetect';
+const autoDetect = () => $<HTMLInputElement>('auto-detect').checked;
 const refMode = () => $<HTMLSelectElement>('ref-mode').value as 'template' | 'manual';
 const colour = (d: Detected) => PALETTE[(d.id - 1) % PALETTE.length];
 
@@ -151,6 +153,8 @@ export async function loadPhotoFile(file: Blob) {
     view?.select(null);
     initCorners();
     processPhoto();
+    // Tracing by hand: have the pen ready.
+    if (!autoDetect()) view?.setTool('pen');
   } catch (err) {
     console.error(err);
     status(`Couldn't read that image: ${(err as Error).message}`, 'warn');
@@ -248,6 +252,23 @@ const overlapRatio = (a: Rect, b: Rect) => {
 /** Re-runs item detection (after a new photo, corner or slider change). Hand-edited shapes stay. */
 function runSegmentation() {
   if (!rectified) return;
+  if (!autoDetect()) {
+    // Tracing by hand: only the shapes drawn or edited by hand.
+    segResult = null;
+    detected = detected.filter((d) => d.edited || d.traced);
+    if (view && view.selected !== null && !detected.some((d) => d.id === view!.selected)) view.select(null);
+    if (refMode() === 'template' && !markersFound)
+      status("Couldn't find the four black squares. Drag handles 1–4 onto their centres (1 = top-left of the sheet).", 'warn');
+    else if (refMode() === 'manual') status('Drag handles 1–4 onto the corners of your reference rectangle (1 → 2 is the width).');
+    else {
+      const straightened = gridCorrection >= 0.5 ? ` · sheet straightened (up to ${gridCorrection.toFixed(1)} mm)` : '';
+      status(`Template found${straightened} · trace your items in the top-down view`, 'ok');
+    }
+    drawPhoto();
+    drawRectified();
+    renderDetected();
+    return;
+  }
   const grid = refMode() === 'template' ? TEMPLATE_GRID : undefined;
   segResult = segmentItems(rectified, {
     ppm: PPM,
@@ -345,7 +366,7 @@ function renderDetected() {
           </div>`,
         )
         .join('')
-    : `<p class="empty">No outlines yet. Trace one with the Pen, Rectangle or Circle tool.</p>`;
+    : `<p class="empty">No outlines yet. Trace each item with the Pen, Rectangle or Circle tool${autoDetect() ? '' : ', or turn on Auto-detect outlines above'}.</p>`;
   const btn = $<HTMLButtonElement>('add-items');
   btn.disabled = used === 0;
   btn.querySelector('span')!.textContent = used ? `Add ${used} item${used === 1 ? '' : 's'} to bin` : 'Add to bin';
@@ -434,6 +455,26 @@ export function initCapture(opts: { onAdded: () => void }) {
     el.addEventListener('input', () => ($(out).textContent = fmtV(el.value)));
     if (apply) el.addEventListener('change', apply);
   };
+  // Automatic detection on or off (remembered; off by default: trace by hand).
+  const auto = $<HTMLInputElement>('auto-detect');
+  try {
+    auto.checked = localStorage.getItem(AUTO_KEY) === '1';
+  } catch {
+    /* storage unavailable */
+  }
+  const syncAuto = () => ($('auto-opts').hidden = $('auto-opts').parentElement!.hidden = !auto.checked);
+  syncAuto();
+  auto.addEventListener('change', () => {
+    try {
+      localStorage.setItem(AUTO_KEY, auto.checked ? '1' : '0');
+    } catch {
+      /* storage unavailable */
+    }
+    syncAuto();
+    history.push();
+    runSegmentation();
+    if (!auto.checked && rectified) view?.setTool('pen');
+  });
   bindSlider('threshold', 'threshold-val', (v) => (+v).toFixed(2), runSegmentation);
   bindSlider('smoothing', 'smoothing-val', (v) => `${v} mm`, runSegmentation);
 

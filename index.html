@@ -101,6 +101,7 @@
           ×
           <label class="num narrow"><input type="number" id="ref-h" value="250" min="10" step="5" aria-label="Reference height" /><span>mm</span></label>
         </span>
+        <label class="switch" title="Find item outlines automatically (you can still edit them). Off: trace each item yourself."><input type="checkbox" id="auto-detect" /><span>Auto-detect outlines</span></label>
         <span class="spacer"></span>
         <span id="photo-status" class="status-chip" role="status"></span>
       </div>
@@ -142,12 +143,14 @@
             <p id="trace-hint" class="trace-hint"></p>
           </div>
           <div class="pane-foot">
+            <span id="auto-opts" class="auto-opts" hidden>
             <label class="slider" title="Applies to automatic outlines; edited and traced ones are kept">Sensitivity <input type="range" id="threshold" min="0.05" max="0.6" step="0.01" value="0.25" /><output id="threshold-val">0.25</output></label>
             <label class="slider" title="Applies to automatic outlines; edited and traced ones are kept">Smoothing <input type="range" id="smoothing" min="0" max="4" step="0.25" value="2" /><output id="smoothing-val">2 mm</output></label>
+            </span>
           </div>
         </div>
         <aside class="pane outlines">
-          <div class="pane-head"><h3>Detected outlines</h3><span class="badge" id="detected-count"></span></div>
+          <div class="pane-head"><h3>Outlines</h3><span class="badge" id="detected-count"></span></div>
           <div id="detected-body" class="detected-list"></div>
           <div class="pane-foot"><button id="add-items" class="btn primary block" disabled><i data-icon="plus"></i><span>Add to bin</span></button></div>
         </aside>
