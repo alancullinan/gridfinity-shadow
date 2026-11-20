@@ -55,9 +55,22 @@ function setSaveState(state: 'pending' | 'saved' | 'failed') {
     state === 'failed' ? `${icon('alert')}Not saved` : state === 'pending' ? 'Saving…' : `${icon('check')}Saved in this browser`;
 }
 
-function updateChrome() {
-  $<HTMLButtonElement>('undo').disabled = !history.canUndo;
-  $<HTMLButtonElement>('redo').disabled = !history.canRedo;
+/** Another undo history the toolbar buttons should drive (the Photo step's outline edits). */
+export interface UndoTarget {
+  undo(): boolean;
+  redo(): boolean;
+  canUndo(): boolean;
+  canRedo(): boolean;
+}
+let undoTarget: UndoTarget | null = null;
+export function setUndoTarget(t: UndoTarget | null) {
+  undoTarget = t;
+  updateChrome();
+}
+
+export function updateChrome() {
+  $<HTMLButtonElement>('undo').disabled = !(undoTarget ? undoTarget.canUndo() : history.canUndo);
+  $<HTMLButtonElement>('redo').disabled = !(undoTarget ? undoTarget.canRedo() : history.canRedo);
   const input = $<HTMLInputElement>('design-name');
   if (document.activeElement !== input) input.value = S.designName;
   document.title = `${S.designName} · Gridfinity Tracer`;
@@ -170,8 +183,8 @@ export function initPersistence() {
     if (e.key === 'Enter' || e.key === 'Escape') nameInput.blur();
   });
 
-  $('undo').addEventListener('click', undo);
-  $('redo').addEventListener('click', redo);
+  $('undo').addEventListener('click', () => (undoTarget ? undoTarget.undo() : undo()));
+  $('redo').addEventListener('click', () => (undoTarget ? undoTarget.redo() : redo()));
   $('new-design').addEventListener('click', newDesign);
   $('open-designs').addEventListener('click', () => openDialog());
 

@@ -15,6 +15,8 @@ const P: Record<string, string> = {
   rotateCcw: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4v5h5"/>',
   rotateCw: '<path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4v5h-5"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  minus: '<path d="M5 12h14"/>',
+  pen: '<path d="M12 19.5 19.5 12l2 2-7.5 7.5z" transform="translate(-1.5 -1.5)"/><path d="m16.5 11-1.5-6.5L3 2l2.5 12 6.5 1.5z"/><path d="m3 2 7.6 7.6"/><circle cx="11.5" cy="10.5" r="1.6"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   square: '<rect x="4" y="6.5" width="16" height="11" rx="1.5"/>',
   circle: '<circle cx="12" cy="12" r="7.5"/>',

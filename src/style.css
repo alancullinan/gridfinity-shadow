@@ -278,6 +278,9 @@ details.more p { margin-top: 8px; max-width: 60ch; }
 .pane-head h3 { font-size: 13.5px; }
 .pane-head .hint { margin-left: auto; text-align: right; }
 .pane-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 12px; background: var(--canvas-bg); overflow: hidden; }
+.pane-body.trace-body { position: relative; padding: 0; }
+.trace-body canvas#rect-canvas { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; border-radius: 0; box-shadow: none; }
+.trace-hint { position: absolute; left: 10px; right: 10px; bottom: 8px; z-index: 2; margin: 0; font-size: 11.5px; line-height: 1.4; color: var(--text-2); pointer-events: none; background: color-mix(in srgb, var(--surface) 88%, transparent); padding: 4px 8px; border-radius: 6px; box-shadow: var(--shadow-sm); }
 .pane-body canvas { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: 4px; box-shadow: var(--shadow-md); touch-action: none; }
 .pane-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 12px; border-top: 1px solid var(--border); }
 .slider { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); flex: 1 1 180px; }
@@ -285,12 +288,15 @@ details.more p { margin-top: 8px; max-width: 60ch; }
 
 .detected-list { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .det {
-  display: grid; grid-template-columns: auto auto 1fr; grid-template-rows: auto auto; gap: 6px 10px; align-items: center;
-  padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2);
+  display: grid; grid-template-columns: auto auto 1fr auto; grid-template-rows: auto auto; gap: 6px 10px; align-items: center;
+  padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); cursor: pointer;
 }
+.det.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.icon-btn.xs { width: 24px; height: 24px; }
+.icon-btn.xs svg { width: 14px; height: 14px; }
 .det.off { opacity: 0.55; }
 .det input[type="text"] { width: 100%; }
-.det-meta { grid-column: 2 / 4; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); }
+.det-meta { grid-column: 2 / 5; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); }
 .panel-empty, .empty { color: var(--muted); font-size: 13px; padding: 16px; text-align: center; }
 
 /* ==========================================================================
@@ -407,6 +413,7 @@ dialog::backdrop { background: rgba(10, 12, 16, 0.5); backdrop-filter: blur(2px)
 .design-row .hint { font-size: 12px; }
 .shortcuts { width: 100%; border-collapse: collapse; font-size: 13px; }
 .shortcuts td { padding: 7px 0; border-bottom: 1px solid var(--border); }
+.shortcuts th { padding: 14px 0 4px; text-align: left; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .shortcuts td:last-child { text-align: right; white-space: nowrap; }
 .shortcuts kbd + kbd { margin-left: 3px; }
 
@@ -448,6 +455,8 @@ dialog::backdrop { background: rgba(10, 12, 16, 0.5); backdrop-filter: blur(2px)
   .paper { max-width: 300px; }
   .capture-grid { grid-template-columns: 1fr; }
   .pane-body { min-height: 300px; }
+  .pane-body.trace-body { min-height: 70vh; }
+  .hide-xs { display: none; }
   .pane-body canvas { max-height: 70vh; }
   .capture-grid .outlines { grid-column: auto; }
   .tips { grid-template-columns: 1fr; }

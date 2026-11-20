@@ -47,8 +47,8 @@ function sheetColour(x: number, y: number): [number, number, number] | null {
   let shade = 1;
   // Cast shadows down and to the right. Known limitation: where a shadow's soft edge runs along
   // a grid line (within ~1.5 mm) for a long stretch, that line isn't recognised and a strip of
-  // shadow can join the item. These offsets keep the edges clear of lines; the touch-up brush
-  // handles the rest.
+  // shadow can join the item. These offsets keep the edges clear of lines; the outline editor can
+  // edit any slivers away on the Photo step.
   for (const s of shapes) shade = Math.min(shade, 0.55 + 0.45 * smooth(-1.5, 1.5, s.sd(x - 2.5, y - 2.5)));
   return [c[0] * shade, c[1] * shade, c[2] * shade];
 }

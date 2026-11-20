@@ -10,8 +10,8 @@ import { toast } from './ui/toast';
 import { S, addItem, arrange, changed, duplicateItem, on, removeItem, select, selectedItem, testShape } from './app/store';
 import { LayoutView, normDeg } from './app/layoutView';
 import { initPanels } from './app/panels';
-import { commitNow, importDesignFile, initPersistence, newDesign, openDialog, quickSave, redo, restoreAutosave, undo } from './app/persistence';
-import { detected, initCapture, loadPhotoFile } from './app/capture';
+import { commitNow, importDesignFile, initPersistence, newDesign, openDialog, quickSave, redo, restoreAutosave, setUndoTarget, undo } from './app/persistence';
+import { captureKey, captureRedo, captureUndo, captureUndoTarget, detected, initCapture, loadPhotoFile, traceClientPoint } from './app/capture';
 
 hydrateIcons();
 
@@ -25,6 +25,7 @@ function setTab(tab: Tab) {
     $(`tab-${t}`).setAttribute('aria-selected', String(t === tab));
   }
   if (tab === 'design') layout.draw();
+  setUndoTarget(tab === 'capture' ? captureUndoTarget : null);
   window.scrollTo({ top: 0 });
 }
 document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab as Tab)));
@@ -151,14 +152,19 @@ document.addEventListener('keydown', (e) => {
       return;
     }
     if (typing && (e.target as HTMLInputElement).type === 'text') return; // text boxes keep their own undo
-    if (k === 'z' && !e.shiftKey) (e.preventDefault(), undo());
-    else if ((k === 'z' && e.shiftKey) || k === 'y') (e.preventDefault(), redo());
+    // On the Photo step, undo applies to outline edits.
+    if (k === 'z' && !e.shiftKey) (e.preventDefault(), (currentTab === 'capture' && captureUndo()) || (currentTab !== 'capture' && undo()));
+    else if ((k === 'z' && e.shiftKey) || k === 'y') (e.preventDefault(), (currentTab === 'capture' && captureRedo()) || (currentTab !== 'capture' && redo()));
     else if (k === 'd' && currentTab === 'design' && selectedItem()) (e.preventDefault(), duplicateItem(selectedItem()!.id));
     return;
   }
   if (typing && e.key === 'Escape') return void (e.target as HTMLElement).blur(); // Esc leaves a text box
   if (typing || e.altKey) return;
   if (e.key === '?') return void (document.getElementById('shortcuts-dialog') as HTMLDialogElement).showModal();
+  if (currentTab === 'capture') {
+    if (captureKey(e)) e.preventDefault();
+    return;
+  }
   if (currentTab !== 'design') return;
   const it = selectedItem();
   const zone = it && S.sel.zone !== null ? it.zones[S.sel.zone] : null;
@@ -303,4 +309,6 @@ changed();
   newDesign,
   openDialog,
   clientPoint: (x: number, y: number) => layout.clientPoint({ x, y }),
+  traceClientPoint,
+  captureUndo,
 };

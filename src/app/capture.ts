@@ -6,19 +6,25 @@ import { detectMarkers } from '../vision/markers';
 import { rectify } from '../vision/homography';
 import { dewarpByGrid } from '../vision/dewarp';
 import { DetectedOutline, SegmentResult, segmentItems } from '../vision/segment';
+import { PathNode, bboxOf, flatten, pathFromPolygon, polygonArea } from '../vision/path';
+import { Tool, TraceShape, TraceView } from './traceView';
 import { bestOrientation, centreLoops } from '../layout';
 import { $, esc, fmt } from '../ui/dom';
 import { icon } from '../ui/icons';
 import { toast } from '../ui/toast';
 import { PALETTE, S, addItem, arrange } from './store';
+import { UndoTarget, updateChrome } from './persistence';
 
 const PPM = 4; // pixels per mm in the rectified image
 
-export interface Detected {
+export interface Detected extends TraceShape {
   outline: DetectedOutline;
-  use: boolean;
   name: string;
   depth: number;
+  /** Changed by hand: kept as it is when detection re-runs. */
+  edited: boolean;
+  /** Drawn by hand rather than detected. */
+  traced: boolean;
 }
 
 let sheet: SheetSpec = SHEETS.a4;
@@ -30,8 +36,9 @@ let rectified: RGBAImage | null = null;
 let segResult: SegmentResult | null = null;
 let rectOrigin: Point = { x: 0, y: 0 };
 let segIgnore: Rect[] = [];
-/** Brush corrections on the top-down image: 1 = item, -1 = paper, 0 = automatic. */
-let edits: Int8Array | null = null;
+let rectImage: HTMLCanvasElement | null = null;
+let nextId = 1;
+let view: TraceView<Detected> | null = null;
 /** How much the grid had to straighten the sheet (paper curl, lens distortion), mm. */
 let gridCorrection = 0;
 /** Detection method: from where the grid is hidden (current template), or by brightness. */
@@ -39,12 +46,84 @@ let method: 'grid' | 'brightness' = 'brightness';
 export let detected: Detected[] = [];
 
 const refMode = () => $<HTMLSelectElement>('ref-mode').value as 'template' | 'manual';
-const colour = (i: number) => PALETTE[i % PALETTE.length];
+const colour = (d: Detected) => PALETTE[(d.id - 1) % PALETTE.length];
 
 function status(msg: string, kind: '' | 'ok' | 'warn' = '') {
   const el = $('photo-status');
   el.className = `status-chip ${kind}`;
   el.innerHTML = msg ? `${icon(kind === 'ok' ? 'check' : kind === 'warn' ? 'alert' : 'info')}<span>${esc(msg)}</span>` : '';
+}
+
+// ------------------------------------------------------------------ undo (Photo step)
+type Snap = Pick<Detected, 'id' | 'paths' | 'use' | 'name' | 'depth' | 'edited' | 'traced'>[];
+const snap = (): string =>
+  JSON.stringify(detected.map(({ id, paths, use, name, depth, edited, traced }) => ({ id, paths, use, name, depth, edited, traced })));
+const history = {
+  undo: [] as string[],
+  redo: [] as string[],
+  push() {
+    this.undo.push(snap());
+    if (this.undo.length > 100) this.undo.shift();
+    this.redo = [];
+    updateChrome();
+  },
+  clear() {
+    this.undo = [];
+    this.redo = [];
+    updateChrome();
+  },
+};
+function restore(json: string) {
+  const sel = view?.selected ?? null;
+  detected = (JSON.parse(json) as Snap).map((d) => makeShape(d.paths, d));
+  if (view) {
+    view.active = null;
+    if (!detected.some((d) => d.id === sel)) view.select(null);
+  }
+  renderDetected();
+  drawRectified();
+  updateChrome();
+}
+/** Undo / redo of outline edits; false when there's nothing to undo. */
+export function captureUndo(): boolean {
+  const s = history.undo.pop();
+  if (s === undefined) return false;
+  history.redo.push(snap());
+  restore(s);
+  return true;
+}
+export function captureRedo(): boolean {
+  const s = history.redo.pop();
+  if (s === undefined) return false;
+  history.undo.push(snap());
+  restore(s);
+  return true;
+}
+export const captureUndoTarget: UndoTarget = {
+  undo: captureUndo,
+  redo: captureRedo,
+  canUndo: () => history.undo.length > 0,
+  canRedo: () => history.redo.length > 0,
+};
+/** Keys for the tracing view (when the Photo step is showing). */
+export const captureKey = (e: KeyboardEvent) => !!view && !!rectified && view.key(e);
+/** Client coordinates of a point in sheet mm on the tracing view (for tests). */
+export const traceClientPoint = (x: number, y: number) => view?.clientPoint(x, y);
+
+const TOOL_HINTS: Record<Tool, string> = {
+  edit: 'Drag a shape to move it, or its points to reshape it. Double-click the outline to add a point, a point to switch corner / curve. Del removes.',
+  pen: 'Click to place corners, click and drag for curves. Click the first point (or press Enter) to close the shape. Esc cancels.',
+  rect: 'Drag to draw a rectangle.',
+  circle: 'Drag from the centre to draw a circle.',
+};
+function syncTool(t: Tool) {
+  document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
+  $('trace-hint').textContent = TOOL_HINTS[t];
+}
+/** Updates just the size in a shape's row while it's being dragged. */
+function updateRowSize(d: Detected) {
+  const row = $('detected-body').querySelector(`[data-i="${detected.indexOf(d)}"] .det-meta span`);
+  if (row) row.textContent = `${fmt(d.outline.bbox.w)} × ${fmt(d.outline.bbox.h)} mm · edited`;
 }
 
 // ------------------------------------------------------------------ template
@@ -68,6 +147,8 @@ export async function loadPhotoFile(file: Blob) {
     $('capture-empty').hidden = true;
     $('capture-work').hidden = false;
     detected = [];
+    history.clear();
+    view?.select(null);
     initCorners();
     processPhoto();
   } catch (err) {
@@ -123,11 +204,48 @@ function processPhoto() {
   }
   rectOrigin = { x: region.x, y: region.y };
   segIgnore = ignore;
-  edits = new Int8Array(rectified.width * rectified.height);
+  rectImage = document.createElement('canvas');
+  rectImage.width = rectified.width;
+  rectImage.height = rectified.height;
+  rectImage.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(rectified.data), rectified.width, rectified.height), 0, 0);
+  view?.setImage(rectImage, rectOrigin, PPM);
   runSegmentation();
 }
 
-/** Re-runs item detection (after slider changes or brush edits). */
+/** Recomputes a shape's polygon outline from its editable paths. */
+function refreshOutline(d: Detected) {
+  d.loops = d.paths.map((p) => flatten(p));
+  const pts = d.loops.flat();
+  d.outline = {
+    loops: d.loops,
+    bbox: bboxOf(pts),
+    areaMm2: d.loops.reduce((a, l, i) => a + (i === 0 ? 1 : -1) * polygonArea(l), 0),
+  };
+}
+
+function makeShape(paths: PathNode[][], extra: Partial<Detected> = {}): Detected {
+  const d: Detected = {
+    id: extra.id ?? nextId++,
+    paths,
+    loops: [],
+    outline: { loops: [], bbox: { x: 0, y: 0, w: 0, h: 0 }, areaMm2: 0 },
+    use: true,
+    name: `Item ${S.items.length + detected.length + 1}`,
+    depth: 12,
+    edited: false,
+    traced: false,
+    ...extra,
+  };
+  refreshOutline(d);
+  return d;
+}
+
+const overlapRatio = (a: Rect, b: Rect) => {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x), h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? (w * h) / Math.max(1e-6, Math.min(a.w * a.h, b.w * b.h)) : 0;
+};
+
+/** Re-runs item detection (after a new photo, corner or slider change). Hand-edited shapes stay. */
 function runSegmentation() {
   if (!rectified) return;
   const grid = refMode() === 'template' ? TEMPLATE_GRID : undefined;
@@ -137,17 +255,23 @@ function runSegmentation() {
     ignore: segIgnore,
     threshold: +$<HTMLInputElement>('threshold').value,
     grid,
-    edits: edits ?? undefined,
     smoothMm: +$<HTMLInputElement>('smoothing').value,
     method,
   });
-  const prev = detected;
-  detected = segResult.outlines.map((outline, i) => ({
-    outline,
-    use: prev[i]?.use ?? true,
-    name: prev[i]?.name ?? `Item ${S.items.length + i + 1}`,
-    depth: prev[i]?.depth ?? 12,
-  }));
+  const kept = detected.filter((d) => d.edited || d.traced);
+  const autos = detected.filter((d) => !d.edited && !d.traced);
+  const fresh: Detected[] = [];
+  segResult.outlines.forEach((outline) => {
+    // An automatic outline that a hand-edited shape already covers is left out.
+    if (kept.some((k) => overlapRatio(k.outline.bbox, outline.bbox) > 0.5)) return;
+    const prev = autos.find((a) => overlapRatio(a.outline.bbox, outline.bbox) > 0.5);
+    const paths = outline.loops.map((l) => pathFromPolygon(l, 0.35));
+    const d = makeShape(paths, prev ? { id: prev.id, use: prev.use, name: prev.name, depth: prev.depth } : { name: `Item ${S.items.length + fresh.length + kept.length + 1}` });
+    if (prev) autos.splice(autos.indexOf(prev), 1);
+    fresh.push(d);
+  });
+  detected = [...fresh, ...kept].sort((a, b) => a.id - b.id);
+  if (view && view.selected !== null && !detected.some((d) => d.id === view!.selected)) view.select(null);
   const n = detected.length;
   if (refMode() === 'template' && !markersFound)
     status("Couldn't find the four black squares. Drag handles 1–4 onto their centres (1 = top-left of the sheet).", 'warn');
@@ -201,52 +325,7 @@ function drawPhoto() {
 }
 
 function drawRectified() {
-  if (!rectified || !segResult) return;
-  const canvas = rectCanvas();
-  canvas.width = rectified.width;
-  canvas.height = rectified.height;
-  const ctx = canvas.getContext('2d')!;
-  const img = new ImageData(new Uint8ClampedArray(rectified.data), rectified.width, rectified.height);
-  // Fade the background so the detected items stand out.
-  const m = segResult.mask;
-  for (let i = 0; i < m.length; i++) {
-    if (m[i]) continue;
-    img.data[i * 4] = img.data[i * 4] * 0.55 + 115;
-    img.data[i * 4 + 1] = img.data[i * 4 + 1] * 0.55 + 115;
-    img.data[i * 4 + 2] = img.data[i * 4 + 2] * 0.55 + 115;
-  }
-  ctx.putImageData(img, 0, 0);
-  const font = getComputedStyle(document.body).fontFamily;
-  detected.forEach((d, i) => {
-    const c = colour(i);
-    ctx.lineJoin = 'round';
-    for (const loop of d.outline.loops) {
-      ctx.beginPath();
-      loop.forEach((p, k) => {
-        const x = (p.x - rectOrigin.x) * PPM, y = (p.y - rectOrigin.y) * PPM;
-        k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-      });
-      ctx.closePath();
-      ctx.fillStyle = c + (d.use ? '40' : '14');
-      ctx.fill();
-      ctx.setLineDash(d.use ? [] : [10, 8]);
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = c;
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    const b = d.outline.bbox;
-    const x = (b.x - rectOrigin.x) * PPM, y = (b.y - rectOrigin.y) * PPM;
-    ctx.beginPath();
-    ctx.arc(x, y, 18, 0, Math.PI * 2);
-    ctx.fillStyle = c;
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = `700 20px ${font}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(i + 1), x, y + 1);
-  });
+  view?.redraw();
 }
 
 function renderDetected() {
@@ -256,16 +335,17 @@ function renderDetected() {
   body.innerHTML = detected.length
     ? detected
         .map(
-          (d, i) => `<div class="det${d.use ? '' : ' off'}" data-i="${i}">
+          (d, i) => `<div class="det${d.use ? '' : ' off'}${view?.selected === d.id ? ' sel' : ''}" data-i="${i}">
             <input type="checkbox" data-f="use" ${d.use ? 'checked' : ''} aria-label="Use outline ${i + 1}">
-            <span class="swatch" style="background:${colour(i)}"></span>
+            <span class="swatch" style="background:${colour(d)}"></span>
             <input type="text" data-f="name" value="${esc(d.name)}" aria-label="Name of outline ${i + 1}">
-            <div class="det-meta"><span>${fmt(d.outline.bbox.w)} × ${fmt(d.outline.bbox.h)} mm</span>
+            <button class="icon-btn xs" data-act="del" title="Delete this outline" aria-label="Delete outline ${i + 1}">${icon('trash')}</button>
+            <div class="det-meta"><span>${fmt(d.outline.bbox.w)} × ${fmt(d.outline.bbox.h)} mm${d.traced ? ' · traced' : d.edited ? ' · edited' : ''}</span>
             <label class="num narrow"><input type="number" data-f="depth" min="1" max="150" step="0.5" value="${d.depth}" aria-label="Depth of outline ${i + 1}"><span>mm</span></label></div>
           </div>`,
         )
         .join('')
-    : `<p class="empty">No outlines yet.</p>`;
+    : `<p class="empty">No outlines yet. Trace one with the Pen, Rectangle or Circle tool.</p>`;
   const btn = $<HTMLButtonElement>('add-items');
   btn.disabled = used === 0;
   btn.querySelector('span')!.textContent = used ? `Add ${used} item${used === 1 ? '' : 's'} to bin` : 'Add to bin';
@@ -356,56 +436,39 @@ export function initCapture(opts: { onAdded: () => void }) {
   };
   bindSlider('threshold', 'threshold-val', (v) => (+v).toFixed(2), runSegmentation);
   bindSlider('smoothing', 'smoothing-val', (v) => `${v} mm`, runSegmentation);
-  bindSlider('brush-size', 'brush-val', (v) => `${v} mm`);
 
-  // Touch-up brush.
-  type BrushMode = 'off' | 'erase' | 'add';
-  let brush: BrushMode = 'off';
-  const rc = rectCanvas();
-  document.querySelectorAll<HTMLButtonElement>('[data-brush]').forEach((b) =>
-    b.addEventListener('click', () => {
-      brush = b.dataset.brush as BrushMode;
-      document.querySelectorAll('[data-brush]').forEach((o) => o.classList.toggle('active', o === b));
-      rc.style.cursor = brush === 'off' ? '' : 'crosshair';
-    }),
+  // Tracing view and tools.
+  view = new TraceView<Detected>(rectCanvas(), {
+    shapes: () => detected,
+    colour,
+    beginChange: () => history.push(),
+    shapeChanged: (d, final) => {
+      d.edited = true;
+      refreshOutline(d);
+      if (final) renderDetected();
+      else updateRowSize(d);
+    },
+    addShape: (paths) => {
+      const d = makeShape(paths, { traced: true });
+      detected.push(d);
+      renderDetected();
+      return d;
+    },
+    removeShape: (d) => {
+      detected = detected.filter((o) => o !== d);
+      renderDetected();
+    },
+    selectionChanged: () => renderDetected(),
+    toolChanged: (t) => syncTool(t),
+  });
+  if (rectImage) view.setImage(rectImage, rectOrigin, PPM);
+  document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((b) =>
+    b.addEventListener('click', () => view!.setTool(b.dataset.tool as Tool)),
   );
-  $('brush-clear').addEventListener('click', () => {
-    if (!edits) return;
-    edits.fill(0);
-    runSegmentation();
-  });
-  let painting = false;
-  const paint = (e: PointerEvent) => {
-    if (!edits || !rectified) return;
-    const b = rc.getBoundingClientRect();
-    const cx = ((e.clientX - b.left) / b.width) * rc.width;
-    const cy = ((e.clientY - b.top) / b.height) * rc.height;
-    const r = (+$<HTMLInputElement>('brush-size').value / 2) * PPM;
-    const val = brush === 'erase' ? -1 : 1;
-    const w = rectified.width, h = rectified.height;
-    for (let y = Math.max(0, Math.floor(cy - r)); y <= Math.min(h - 1, Math.ceil(cy + r)); y++)
-      for (let x = Math.max(0, Math.floor(cx - r)); x <= Math.min(w - 1, Math.ceil(cx + r)); x++)
-        if ((x - cx) ** 2 + (y - cy) ** 2 <= r * r) edits[y * w + x] = val;
-    const ctx = rc.getContext('2d')!;
-    ctx.fillStyle = brush === 'erase' ? 'rgba(255,255,255,0.75)' : 'rgba(37,99,235,0.55)';
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
-  };
-  rc.addEventListener('pointerdown', (e) => {
-    if (brush === 'off') return;
-    painting = true;
-    rc.setPointerCapture(e.pointerId);
-    paint(e);
-  });
-  rc.addEventListener('pointermove', (e) => painting && paint(e));
-  const endPaint = () => {
-    if (!painting) return;
-    painting = false;
-    runSegmentation();
-  };
-  rc.addEventListener('pointerup', endPaint);
-  rc.addEventListener('pointercancel', endPaint);
+  $('trace-fit').addEventListener('click', () => view!.fit());
+  $('trace-zoom-in').addEventListener('click', () => view!.zoomBy(1.4));
+  $('trace-zoom-out').addEventListener('click', () => view!.zoomBy(1 / 1.4));
+  syncTool('edit');
 
   // Detected outlines list.
   const body = $('detected-body');
@@ -416,10 +479,32 @@ export function initCapture(opts: { onAdded: () => void }) {
     if (t.dataset.f === 'name') d.name = t.value;
     if (t.dataset.f === 'depth' && +t.value > 0) d.depth = +t.value;
   });
+  body.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    const row = t.closest<HTMLElement>('[data-i]');
+    const d = detected[+(row?.dataset.i ?? -1)];
+    if (!d) return;
+    if (t.closest('[data-act="del"]')) {
+      history.push();
+      detected = detected.filter((o) => o !== d);
+      if (view?.selected === d.id) view.select(null);
+      renderDetected();
+      drawRectified();
+      return;
+    }
+    if (t.closest('input')) return;
+    view?.select(d.id);
+  });
+  body.addEventListener('focusin', (e) => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-i]');
+    const d = detected[+(row?.dataset.i ?? -1)];
+    if (d && view && view.selected !== d.id) view.select(d.id);
+  });
   body.addEventListener('change', (e) => {
     const t = e.target as HTMLInputElement;
     const d = detected[+(t.closest<HTMLElement>('[data-i]')?.dataset.i ?? -1)];
     if (!d || t.dataset.f !== 'use') return;
+    history.push();
     d.use = t.checked;
     drawRectified();
     renderDetected();
@@ -429,6 +514,7 @@ export function initCapture(opts: { onAdded: () => void }) {
     const chosen = detected.filter((d) => d.use);
     if (!chosen.length) return;
     for (const d of chosen) {
+      refreshOutline(d);
       const { loops } = centreLoops(d.outline.loops);
       addItem({ name: d.name, loops, depth: d.depth, x: 0, y: 0, rotation: bestOrientation(loops), notches: [], zones: [] });
     }
