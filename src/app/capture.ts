@@ -34,6 +34,8 @@ let segIgnore: Rect[] = [];
 let edits: Int8Array | null = null;
 /** How much the grid had to straighten the sheet (paper curl, lens distortion), mm. */
 let gridCorrection = 0;
+/** Detection method: from where the grid is hidden (current template), or by brightness. */
+let method: 'grid' | 'brightness' = 'brightness';
 export let detected: Detected[] = [];
 
 const refMode = () => $<HTMLSelectElement>('ref-mode').value as 'template' | 'manual';
@@ -111,10 +113,12 @@ function processPhoto() {
     return;
   }
   // With the printed template, use its grid to undo paper curl and lens distortion.
+  method = 'brightness';
   if (refMode() === 'template') {
     const markers = ignore.map((z) => ({ x: z.x - region.x, y: z.y - region.y, w: z.w, h: z.h })).filter((z) => z.w < 30 && z.h < 30);
     const dw = dewarpByGrid(rectified, PPM, TEMPLATE_GRID, markers);
     gridCorrection = dw ? dw.maxShiftMm : 0;
+    method = dw?.boldLines ? 'grid' : 'brightness';
     if (dw) rectified = dw.image;
   }
   rectOrigin = { x: region.x, y: region.y };
@@ -135,6 +139,7 @@ function runSegmentation() {
     grid,
     edits: edits ?? undefined,
     smoothMm: +$<HTMLInputElement>('smoothing').value,
+    method,
   });
   const prev = detected;
   detected = segResult.outlines.map((outline, i) => ({

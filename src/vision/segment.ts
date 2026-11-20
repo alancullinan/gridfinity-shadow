@@ -1,5 +1,6 @@
 import type { Point, Rect } from '../sheet';
 import { RGBAImage, fillHoles, gridLineMask, labelComponents, morph } from './image';
+import { gridOccupancy } from './gridSegment';
 import { simplifyClosed, smoothClosed, traceLoops } from './contour';
 import { polygonArea } from './markers';
 
@@ -34,6 +35,13 @@ export interface SegmentOptions {
   shadowLevel?: number;
   /** See InkOptions.grid. */
   grid?: InkOptions['grid'];
+  /**
+   * With a known grid: 'grid' finds items where the printed grid is hidden (refined by image
+   * evidence near edges); 'brightness' compares pixels with the local paper. 'grid' needs the
+   * current template (bold lines; the faint lines of older prints aren't reliable enough).
+   * Default 'brightness'.
+   */
+  method?: 'grid' | 'brightness';
   /** Manual corrections per rectified pixel: 1 = force item, -1 = force paper, 0 = automatic. */
   edits?: Int8Array;
 }
@@ -204,6 +212,8 @@ export interface InkOptions {
    * least slightly darker than paper: strong evidence of an item even when it's pale or shiny.
    */
   hidden?: Uint8Array;
+  /** If given, receives the paper-relative darkness and colour maps. */
+  maps?: { dark?: Float32Array; chroma?: Float32Array; rel?: Float32Array };
   /** Filled with intermediate maps for debugging, if given. */
   debug?: { line?: Float32Array; paper?: Uint8Array; gridFound?: boolean; rel?: Float32Array; illum?: Float32Array; probe?: (x: number, y: number) => unknown };
 }
@@ -416,6 +426,10 @@ export function inkMap(img: RGBAImage, ignored: Uint8Array, opts: InkOptions): F
   const n = w * h;
   const dark = new Float32Array(n); // 1 - brightness relative to paper, ignoring the red channel
   const chroma = new Float32Array(n); // how coloured the pixel is relative to paper
+  if (opts.maps) {
+    opts.maps.dark = dark;
+    opts.maps.chroma = chroma;
+  }
   const line = new Float32Array(n); // 1 where a grid line is visible (in light or shadow)
   const bright = new Float32Array(n); // brightness relative to paper
   const p = [0, 0, 0];
@@ -525,6 +539,7 @@ export function inkMap(img: RGBAImage, ignored: Uint8Array, opts: InkOptions): F
         // Darkness (or brightness, e.g. shiny steel) relative to the paper around it.
         const rel = 1 - (1 - d) / illum(x, y);
         const st = state[i];
+        if (opts.maps) (opts.maps.rel ??= new Float32Array(n))[i] = rel;
         if (opts.debug) {
           (opts.debug.rel ??= new Float32Array(n))[i] = rel;
           (opts.debug.illum ??= new Float32Array(n))[i] = illum(x, y);
@@ -566,10 +581,34 @@ export function segmentItems(img: RGBAImage, opts: SegmentOptions): SegmentResul
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) ignored[y * w + x] = 1;
   }
   const hidden = new Uint8Array(w * h);
-  const ink = inkMap(img, ignored, { ppm, shadowLevel: opts.shadowLevel, grid: opts.grid, hidden });
+  const maps: { dark?: Float32Array; chroma?: Float32Array; rel?: Float32Array } = {};
+  const ink = inkMap(img, ignored, { ppm, shadowLevel: opts.shadowLevel, grid: opts.grid, hidden, maps });
+  if (opts.grid && opts.method === 'grid') {
+    // Where the grid is hidden is an item; plus anything clearly dark or coloured (an item small
+    // enough to touch no grid line); outside the printed grid, fall back to brightness.
+    const occ = gridOccupancy(img, ppm, opts.grid, ignored);
+    const dark = maps.dark!, chroma = maps.chroma!, rel = maps.rel;
+    for (let i = 0; i < w * h; i++) {
+      const v = occ.value[i];
+      const strong = dark[i] > 0.7 || (chroma[i] > 0.15 && !occ.line[i]);
+      let item = v >= 0.5;
+      // Between the points where an edge crosses grid lines the shape is interpolated; there, let
+      // the image decide: clearly unlike the local paper is item, clearly like it is paper.
+      if (v > 0.12 && v < 0.88 && rel && !occ.line[i]) {
+        const r = rel[i];
+        if (r > 0.2 || r < -0.12 || chroma[i] > 0.08) item = true; // darker side needs more: shadows
+        else if (Math.abs(r) < 0.05 && chroma[i] < 0.05) item = false;
+      }
+      hidden[i] = !ignored[i] && (item || strong || (v < 0 && ink[i] > opts.threshold)) ? 1 : 0;
+      ink[i] = 0;
+    }
+  }
   // Hidden-grid evidence comes in solid patches on real items; drop isolated specks (e.g. where a
   // grid line meets a soft shadow edge) before using it.
-  const rSpeck = Math.max(1, Math.round(ppm * 0.4));
+  // (The grid method can leave line-wide spikes where a short stretch of line next to an item
+  // reads as covered; a slightly larger radius removes those too.)
+  const useGrid = !!opts.grid && opts.method === 'grid';
+  const rSpeck = Math.max(1, Math.round(ppm * (useGrid ? 0.75 : 0.4)));
   const solidHidden = morph(morph(hidden, w, h, rSpeck, false), w, h, rSpeck, true);
   let mask = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) mask[i] = !ignored[i] && (ink[i] > opts.threshold || solidHidden[i]) ? 1 : 0;

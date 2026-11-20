@@ -22,6 +22,8 @@ export interface DewarpResult {
   maxShiftMm: number;
   /** Fraction of the sheet where the grid could be measured. */
   coverage: number;
+  /** True if the template's bold lines were found (the current template). */
+  boldLines: boolean;
   /** Displacement fields (pixels) on the coarse block grid, for diagnostics. */
   field?: { nx: number; ny: number; dx: Float32Array; dy: Float32Array; confX: Float32Array; confY: Float32Array; rawX: Float32Array; rawY: Float32Array };
 }
@@ -243,6 +245,7 @@ export function dewarpByGrid(
     image: out,
     maxShiftMm: maxShift / ppm,
     coverage: Math.min(fx.coverage, fy.coverage),
+    boldLines: !!major,
     field: { nx, ny, dx: fx.field, dy: fy.field, confX: mX.conf, confY: mY.conf, rawX: mX.shift, rawY: mY.shift },
   };
 }

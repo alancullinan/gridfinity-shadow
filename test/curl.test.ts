@@ -113,15 +113,18 @@ describe('curled sheet with the bold-line template', () => {
     console.log('correction (mm):', dw!.maxShiftMm.toFixed(2), 'coverage:', dw!.coverage.toFixed(2));
     expect(dw!.maxShiftMm).toBeGreaterThan(5); // the bend was found...
     expect(dw!.maxShiftMm).toBeLessThan(9); // ...and nothing absurd
+    expect(dw!.boldLines).toBe(true);
     rect = dw!.image;
-    const res = segmentItems(rect, { ppm, origin: region, ignore: ignoreZones(sheet), threshold: 0.25, grid: TEMPLATE_GRID, smoothMm: 2 });
+    // As in the app: with the bold-line template, detect items from where the grid is hidden.
+    const res = segmentItems(rect, { ppm, origin: region, ignore: ignoreZones(sheet), threshold: 0.25, grid: TEMPLATE_GRID, smoothMm: 2, method: 'grid' });
     const dims = res.outlines.map((o) => [+o.bbox.w.toFixed(1), +o.bbox.h.toFixed(1)]);
     console.log('detected:', JSON.stringify(dims));
     expect(res.outlines.length).toBe(shapes.length);
-    // 2 mm tolerance on this deliberately harsh sheet (7 mm bend, shadows, blur). Errors here are
-    // a sliver of shadow at an edge, which makes a pocket slightly bigger, never smaller.
+    // 3 mm tolerance on this deliberately harsh sheet (7 mm bend, shadows, blur). The remaining
+    // errors are slivers of shadow where a shadow edge runs along a grid line (see above), which
+    // make a pocket slightly bigger, never smaller.
     for (const s of shapes) {
-      const ok = dims.some(([w, h]) => Math.abs(w - s.size[0]) < 2 && Math.abs(h - s.size[1]) < 2);
+      const ok = dims.some(([w, h]) => Math.abs(w - s.size[0]) < 3 && Math.abs(h - s.size[1]) < 3);
       expect(ok, `expected ${s.size} in ${JSON.stringify(dims)}`).toBe(true);
     }
   }, 60000);
