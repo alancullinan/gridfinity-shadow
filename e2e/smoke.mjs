@@ -12,7 +12,8 @@ fs.mkdirSync(out, { recursive: true });
 const URL = 'http://localhost:5173/';
 const browser = await chromium.launch();
 
-// 1. Make a fake photo.
+// 1. Make a fake photo. Items sit at arbitrary (off-grid) positions as in real use; an edge lying
+// exactly on a printed grid line next to a shadow is a known weak spot (see test/curl.test.ts).
 const maker = await browser.newPage({ viewport: { width: 900, height: 1200 }, deviceScaleFactor: 2 });
 await maker.goto(URL);
 const svg = await maker.evaluate(async () => {
@@ -26,12 +27,12 @@ await maker.setContent(`<html><body style="margin:0;background:#6d5a48;width:900
 <div style="perspective:1400px;width:900px;height:1200px;display:grid;place-items:center">
  <div style="position:relative;width:${mm(210)};height:${mm(297)};transform:rotateX(16deg) rotateY(-5deg) rotateZ(-7deg);box-shadow:0 10px 40px #0006">
   <div style="position:absolute;inset:0">${svg.replace('width="210mm" height="297mm"', `width="${210 * K}" height="${297 * K}"`)}</div>
-  <div style="position:absolute;left:${mm(40)};top:${mm(50)};width:${mm(90)};height:${mm(18)};background:#2b2f36;border-radius:${mm(4)};filter:drop-shadow(${mm(2)} ${mm(2.5)} ${mm(1.5)} rgba(0,0,0,0.45))"></div>
-  <div style="position:absolute;left:${mm(130)};top:${mm(120)};width:${mm(30)};height:${mm(30)};background:#c0392b;border-radius:50%;filter:drop-shadow(${mm(2)} ${mm(2.5)} ${mm(1.5)} rgba(0,0,0,0.45))"></div>
+  <div style="position:absolute;left:${mm(41.3)};top:${mm(51.7)};width:${mm(90)};height:${mm(18)};background:#2b2f36;border-radius:${mm(4)};filter:drop-shadow(${mm(2)} ${mm(2.5)} ${mm(1.5)} rgba(0,0,0,0.45))"></div>
+  <div style="position:absolute;left:${mm(131.6)};top:${mm(121.2)};width:${mm(30)};height:${mm(30)};background:#c0392b;border-radius:50%;filter:drop-shadow(${mm(2)} ${mm(2.5)} ${mm(1.5)} rgba(0,0,0,0.45))"></div>
   <svg style="position:absolute;left:0;top:0;filter:drop-shadow(${mm(2)} ${mm(2.5)} ${mm(1.5)} rgba(0,0,0,0.45))" width="${210 * K}" height="${297 * K}" viewBox="0 0 210 297">
-    <path d="M40 150 h14 v70 h46 v14 h-60 z" fill="#d68910"/>
+    <path d="M41.8 151.4 h14 v70 h46 v14 h-60 z" fill="#d68910"/>
   </svg>
-  <div style="position:absolute;left:${mm(170)};top:${mm(30)};width:${mm(25)};height:${mm(230)};background:#8d9299;border-radius:${mm(3)};${'filter:drop-shadow(' + mm(2) + ' ' + mm(2.5) + ' ' + mm(1.5) + ' rgba(0,0,0,0.45))'}"></div>
+  <div style="position:absolute;left:${mm(168.4)};top:${mm(31.6)};width:${mm(25)};height:${mm(230)};background:#8d9299;border-radius:${mm(3)};${'filter:drop-shadow(' + mm(2) + ' ' + mm(2.5) + ' ' + mm(1.5) + ' rgba(0,0,0,0.45))'}"></div>
   <div style="position:absolute;inset:0;background:linear-gradient(120deg,#0000 40%,#0003)"></div>
  </div>
 </div></body></html>`);

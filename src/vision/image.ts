@@ -236,3 +236,19 @@ export function ridgeMask(
     }
   return out;
 }
+
+/**
+ * Grid lines at two scales: a narrow test for thin lines (which stays accurate inside soft shadow
+ * edges) combined with a wide one for bold lines.
+ */
+export function gridLineMask(bright: Float32Array, w: number, h: number, ppm: number, ratio: number, minPaper: number, sideOut?: Float32Array): Uint8Array {
+  const narrow = ridgeMask(bright, w, h, Math.max(2, Math.round(ppm * 0.75)), ratio, minPaper, sideOut);
+  const wideSide = sideOut ? new Float32Array(w * h).fill(-1) : undefined;
+  const wide = ridgeMask(bright, w, h, Math.max(3, Math.round(ppm * 1.25)), ratio, minPaper, wideSide);
+  for (let i = 0; i < w * h; i++)
+    if (wide[i] && !narrow[i]) {
+      narrow[i] = 1;
+      if (sideOut && wideSide) sideOut[i] = wideSide[i];
+    }
+  return narrow;
+}

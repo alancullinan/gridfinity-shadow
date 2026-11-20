@@ -4,7 +4,7 @@ Photograph your items on a printed grid and get a [Gridfinity](https://gridfinit
 
 ## How it works
 
-1. **Print the template** (A4 or US Letter) from the app. It has a light-cyan 5 mm grid and four black corner markers. Print at 100% and check the 100 mm bar.
+1. **Print the template** (A4 or US Letter) from the app: a mid-grey 5 mm grid (0.45 mm lines) with a bold line every 25 mm, distance labels and four black corner markers. Print at 100% and check the 100 mm bar. The bold lines let the app straighten a curled sheet by up to about 10 mm; older prints still work.
 2. **Photograph** one or more items lying on the sheet. The app finds the markers, corrects perspective to a true top-down view at 0.25 mm per pixel, evens out the lighting, filters out the cyan grid and traces each item's outline.
    - **Straightening:** the printed grid is used as a dense calibration target. If the sheet isn't perfectly flat (curl, bowing) or the lens distorts, the image is un-bent so every grid line lands where it belongs, keeping measurements accurate across the sheet.
    - **Shadows** are told apart from items by checking whether the printed grid lines are still visible (they show through a shadow but not through an item), and by comparing each spot with the local paper brightness measured beside visible lines, so shadowed paper matches its surroundings. Grid lines of any colour work (many printers print the cyan grid grey). A touch-up brush can erase or add areas by hand.

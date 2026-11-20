@@ -31,6 +31,11 @@ export const SHEET_MARGIN = 10;
 export const MARKER_SIZE = 10;
 /** Grid pitch printed on the template. */
 export const GRID_PITCH = 5;
+/** Every this many grid lines, a bold line (every 25 mm). Lets the software tell lines apart. */
+export const MAJOR_EVERY = 5;
+/** Printed line widths, mm: wide enough to survive camera blur and shadows. */
+export const MINOR_LINE_MM = 0.45;
+export const MAJOR_LINE_MM = 0.9;
 
 /** Centres of the four corner markers, in order TL, TR, BR, BL. */
 export function markerCenters(sheet: SheetSpec): Point[] {
@@ -60,7 +65,7 @@ export function workRegion(sheet: SheetSpec): Rect {
 }
 
 /** The template's grid as seen in the rectified work region. */
-export const TEMPLATE_GRID = { pitch: GRID_PITCH, offsetX: REGION_PAD, offsetY: REGION_PAD };
+export const TEMPLATE_GRID = { pitch: GRID_PITCH, offsetX: REGION_PAD, offsetY: REGION_PAD, majorEvery: MAJOR_EVERY };
 
 /** Areas (markers plus a little padding) that must be ignored when looking for items. */
 export function ignoreZones(sheet: SheetSpec): Rect[] {

@@ -1,5 +1,5 @@
 import type { Point, Rect } from '../sheet';
-import { RGBAImage, fillHoles, labelComponents, morph, ridgeMask } from './image';
+import { RGBAImage, fillHoles, gridLineMask, labelComponents, morph } from './image';
 import { simplifyClosed, smoothClosed, traceLoops } from './contour';
 import { polygonArea } from './markers';
 
@@ -198,14 +198,14 @@ export interface InkOptions {
    */
   shadowLevel?: number;
   /** Printed grid, if known: line pitch and the position of one line, in mm from the image origin. */
-  grid?: { pitch: number; offsetX: number; offsetY: number };
+  grid?: { pitch: number; offsetX: number; offsetY: number; majorEvery?: number };
   /**
    * If given, set to 1 where the printed grid is hidden but should be visible and the pixel is at
    * least slightly darker than paper: strong evidence of an item even when it's pale or shiny.
    */
   hidden?: Uint8Array;
   /** Filled with intermediate maps for debugging, if given. */
-  debug?: { line?: Float32Array; paper?: Uint8Array; gridFound?: boolean; rel?: Float32Array; illum?: Float32Array };
+  debug?: { line?: Float32Array; paper?: Uint8Array; gridFound?: boolean; rel?: Float32Array; illum?: Float32Array; probe?: (x: number, y: number) => unknown };
 }
 
 /**
@@ -362,15 +362,20 @@ function gridVisibility(line: Float32Array, w: number, h: number, ppm: number, g
    * sides; 1 = visible on at least one side each way (paper, or an item's edge near paper);
    * 0 = hidden.
    */
-  const classify = (x: number, y: number): 0 | 1 | 2 => {
-    const ky = rowIdx[y];
+  /**
+   * 3 = hidden on all four sides (strong evidence of an item); 0 = hidden in one direction;
+   * 1 = visible on at least one side each way (paper, or an item's edge); 2 = visible on all
+   * four sides.
+   */
+  const classify = (x: number, y: number): 0 | 1 | 2 | 3 => {
+    const ky = rowIdx[y], kx = colIdx[x];
     const up = ky >= 0 && visH[ky][x] === 1;
     const down = ky + 1 < ys.length && visH[ky + 1][x] === 1;
-    if (!up && !down) return 0;
-    const kx = colIdx[x];
     const left = kx >= 0 && visV[kx][y] === 1;
     const right = kx + 1 < xs.length && visV[kx + 1][y] === 1;
-    if (!left && !right) return 0;
+    if (!up && !down && !left && !right) return 3;
+    // (Lines visible both sides one way don't prove paper: a ruler's ticks look just like that.)
+    if ((!up && !down) || (!left && !right)) return 0;
     return up && down && left && right ? 2 : 1;
   };
   /** True if (x, y) lies on a grid line that is visible there. */
@@ -380,7 +385,12 @@ function gridVisibility(line: Float32Array, w: number, h: number, ppm: number, g
     for (const k of [ky, ky + 1]) if (k >= 0 && k < ys.length && visH[k][x] && Math.abs(pathH[k][x] - y) <= band) return true;
     return false;
   };
-  return { classify, onLine };
+  /** Diagnostics: the four neighbouring lines' expected positions and visibility at (x, y). */
+  const probe = (x: number, y: number) => {
+    const ky = rowIdx[y], kx = colIdx[x];
+    return { pathH: [pathH[ky]?.[x], pathH[ky + 1]?.[x]], pathV: [pathV[kx]?.[y], pathV[kx + 1]?.[y]], visH: [visH[ky]?.[x], visH[ky + 1]?.[x]], visV: [visV[kx]?.[y], visV[kx + 1]?.[y]] };
+  };
+  return { classify, onLine, probe };
 }
 
 /**
@@ -432,7 +442,8 @@ export function inkMap(img: RGBAImage, ignored: Uint8Array, opts: InkOptions): F
       chroma[i] = gb + Math.max(0, nr - Math.max(ng, nb));
       const mean = (ng + nb) / 2;
       // Cyan lines (as designed): red dips while green and blue stay put.
-      line[i] = mean > 0.15 && gb < 0.12 && nr / mean < 0.9 ? 1 : 0;
+      // (Reasonably bright with a clear red dip: dark bluish items must not match.)
+      line[i] = mean > 0.3 && gb < 0.12 && nr / mean < 0.9 ? 1 : 0;
       bright[i] = Math.min(nr, ng, nb);
     }
   }
@@ -440,7 +451,7 @@ export function inkMap(img: RGBAImage, ignored: Uint8Array, opts: InkOptions): F
   // darker than the brightest paper right next to it. As a ratio it works the same in light and
   // in shadow, and it ignores dark areas (inside an item there's no bright paper nearby).
   const lineSide = new Float32Array(n).fill(-1);
-  const ridge = ridgeMask(bright, w, h, Math.max(2, Math.round(ppm * 0.75)), 0.86, 0.3, lineSide);
+  const ridge = gridLineMask(bright, w, h, ppm, 0.86, 0.3, lineSide);
   for (let i = 0; i < n; i++) if (!line[i] && !ignored[i] && ridge[i] && chroma[i] < 0.15) line[i] = 1;
 
 
@@ -448,6 +459,7 @@ export function inkMap(img: RGBAImage, ignored: Uint8Array, opts: InkOptions): F
   if (opts.debug) {
     opts.debug.line = line;
     opts.debug.gridFound = !!onPaper;
+    opts.debug.probe = onPaper?.probe;
     if (onPaper) {
       const paper = new Uint8Array(n);
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) paper[y * w + x] = onPaper.classify(x, y);
@@ -531,8 +543,10 @@ export function inkMap(img: RGBAImage, ignored: Uint8Array, opts: InkOptions): F
           if (opts.hidden && (rel > 0.3 || rel < -0.35 || chroma[i] > 0.08)) opts.hidden[i] = 1;
         } else {
           neutralInk = Math.max(0, rel);
-          // The grid is hidden here: an item if it differs at all from the paper around it.
-          if (opts.hidden && (rel > 0.06 || rel < -0.25 || chroma[i] > 0.05)) opts.hidden[i] = 1;
+          // The grid is hidden here: an item if it differs from the paper around it. Hidden on all
+          // four sides is strong evidence, so even a pale item barely darker than lit paper counts.
+          const strong = st === 3 && (Math.abs(rel) > 0.04 || d > 0.08);
+          if (opts.hidden && (strong || rel > 0.06 || rel < -0.25 || chroma[i] > 0.05)) opts.hidden[i] = 1;
         }
       } else neutralInk = d > shadowLevel ? d : d * 0.3;
       ink[i] = Math.max(colourInk, neutralInk);
